@@ -1,0 +1,2 @@
+# ITriggr
+News App Project
