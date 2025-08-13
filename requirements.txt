@@ -1,0 +1,4 @@
+streamlit>=1.33
+firebase-admin>=6.5.0
+google-cloud-firestore>=2.15.0
+requests>=2.31.0
