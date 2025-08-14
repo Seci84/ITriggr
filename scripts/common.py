@@ -3,8 +3,14 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from dateutil import parser as dtparser
 from datetime import datetime, timezone
+import hashlib
 
 # --- Firestore init ---
+
+def doc_id_from_url(url: str) -> str:
+    """URL을 SHA256으로 32자 고정 ID로 변환 (raw_articles 문서 ID로 사용)."""
+    return hashlib.sha256((url or "").encode("utf-8")).hexdigest()[:32]
+
 def init_db():
     svc = os.getenv("FIREBASE_SERVICE_ACCOUNT")
     if not svc:
