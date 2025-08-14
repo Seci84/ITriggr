@@ -1,3 +1,6 @@
+# 역할: NewsAPI(+옵션 RSS)에서 기사 수집 → URL 기준 완전 중복만 제거 → raw_articles 저장
+# (유사 기사들은 남겨둠 → 다음 단계에서 묶어서 재구성)
+
 import os, requests, feedparser
 from common import init_db, now_epoch, to_epoch, normalize, sha256, simhash, log_event
 from firebase_admin import firestore
