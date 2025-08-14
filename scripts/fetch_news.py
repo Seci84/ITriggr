@@ -2,8 +2,10 @@
 # (유사 기사들은 남겨둠 → 다음 단계에서 묶어서 재구성)
 
 import os, requests, feedparser
-from common import init_db, now_epoch, to_epoch, normalize, sha256, simhash, log_event
+from common import init_db, now_epoch, to_epoch, normalize, sha256, simhash, log_event, doc_id_from_url
 from firebase_admin import firestore
+
+
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 RSS_SOURCES = os.getenv("RSS_SOURCES", "")
@@ -61,24 +63,43 @@ def fetch_rss():
             })
     return out
 
+
 def save_raw(db, items):
-    saved, skipped = 0, 0
+    saved, skipped, updated = 0, 0, 0
     col = db.collection("raw_articles")
+
     for it in items:
-        # URL 해시로 "완전 중복"만 차단
-        url_hash = sha256(it["url"])
-        doc_ref = col.document(url_hash)
-        if doc_ref.get().exists:
-            skipped += 1
-            continue
-        # 유사도 군집용 simhash(제목+요약 힌트)
-        s = simhash(f"{it['title']} {it.get('content_hint','')}")
-        it["url_hash"] = url_hash
-        it["simhash"] = s
-        it["created_at"] = firestore.SERVER_TIMESTAMP
-        doc_ref.set(it)
-        saved += 1
-    return saved, skipped
+        url = it["url"]
+        doc_id = doc_id_from_url(url)           # URL 해시 = 문서 ID
+        doc_ref = col.document(doc_id)
+        snap = doc_ref.get()
+
+        # 유사도 군집용 값 계산 (제목+요약 힌트)
+        it["url_hash"] = sha256(url)            # 참고용 필드(쿼리/검증)
+        it["simhash"] = simhash(f"{it['title']} {it.get('content_hint','')}")
+        it.setdefault("created_at", firestore.SERVER_TIMESTAMP)
+
+        if snap.exists:
+            # 이미 있으면 최신 메타만 업데이트 (예: published_at 오차 보정)
+            doc_ref.set({
+                "source": it["source"],
+                "source_name": it["source_name"],
+                "title": it["title"],
+                "url": it["url"],
+                "published_at": it["published_at"],
+                "content_hint": it.get("content_hint", ""),
+                "lang": it.get("lang","en"),
+                "simhash": it["simhash"],
+                "url_hash": it["url_hash"],
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+            updated += 1
+        else:
+            doc_ref.set(it)                     # 최초 저장
+            saved += 1
+
+    return saved, skipped, updated
+
 
 if __name__ == "__main__":
     db = init_db()
@@ -97,6 +118,8 @@ if __name__ == "__main__":
         print("No items")
         raise SystemExit(0)
 
-    saved, skipped = save_raw(db, all_items)
-    log_event(db, "ingest_done", {"saved": saved, "skipped": skipped, "total": len(all_items)})
-    print(f"saved={saved} skipped={skipped} total={len(all_items)}")
+
+    saved, skipped, updated = save_raw(db, all_items)
+    log_event(db, "ingest_done", {"saved": saved, "updated": updated, "total": len(all_items)})
+    print(f"saved={saved} updated={updated} total={len(all_items)}")
+
