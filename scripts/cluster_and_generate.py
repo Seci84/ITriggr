@@ -68,8 +68,8 @@ def run_once():
     created = 0
 
     for cluster_key, items in groups.items():
-        # 유사 기사만 묶는다: 최소 2개 이상
-        if len(items) < 2:
+        # 유사 기사만 묶는다: 최소 2개 이상 (군집 형성이 되지 않았을 경우를 대비하여 2->1로 수정)
+        if len(items) < 1:
             continue
         if already_generated(db, cluster_key):
             continue
