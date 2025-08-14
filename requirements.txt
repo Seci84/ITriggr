@@ -2,3 +2,12 @@ streamlit>=1.33
 firebase-admin>=6.5.0
 google-cloud-firestore>=2.15.0
 requests>=2.31.0
+
+# Week 2 파이프라인용
+feedparser>=6.0.11          # RSS 피드 파싱
+python-dateutil>=2.9.0      # 날짜 변환
+pytz>=2024.1                # 타임존 처리
+
+# (선택) LLM 요약 생성
+openai>=1.42.0              # OpenAI API 호출
+tiktoken>=0.7.0             # 토큰 계산
