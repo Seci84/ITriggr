@@ -140,7 +140,7 @@ def run_once():
                     model="gpt-3.5-turbo",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
-                    response_format="json"
+                    response_format="json_object",
                 )
                 latency_ms = int((time.time() - t0) * 1000)
 
