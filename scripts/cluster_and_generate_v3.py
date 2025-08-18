@@ -23,17 +23,17 @@ PROMPT = """You are a news rewrite assistant.
 Return ONLY a single JSON object. No code fences, no explanations, no comments.
 
 Required JSON shape:
-{
+{{
   "title": "string",
   "summary": "string",
   "bullets": ["string", "string", "string"],
-  "facts": [{"text":"string","evidence_url":"string"}],
-  "actions": {
-    "stock":[{"action":"","assumptions":"","risk":"","alternative":""}],
-    "futures":[{"action":"","assumptions":"","risk":"","alternative":""}],
-    "biz":[{"action":"","assumptions":"","risk":"","alternative":""}]
-  }
-}
+  "facts": [{{"text":"string","evidence_url":"string"}}],
+  "actions": {{
+    "stock":[{{"action":"","assumptions":"","risk":"","alternative":""}}],
+    "futures":[{{"action":"","assumptions":"","risk":"","alternative":""}}],
+    "biz":[{{"action":"","assumptions":"","risk":"","alternative":""}}]
+  }}
+}}
 
 Rules:
 - Use available sources (one or more). Cite at least 1 item in "facts" with evidence_url chosen from the given Sources list.
@@ -43,6 +43,7 @@ Rules:
 Sources:
 {sources}
 """
+
 
 def safe_parse_json(content: str):
     """LLM 응답에서 JSON만 안전하게 추출."""
