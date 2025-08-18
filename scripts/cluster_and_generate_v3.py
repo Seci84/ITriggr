@@ -13,10 +13,18 @@ from common import init_db, log_event, sim_prefix
 from openai.types.chat.completion_create_params import ResponseFormat
 
 # --- OpenAI 사용 여부 ---
-USE_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
+
+client = None  # ✅ 항상 미리 정의
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or ""
+USE_OPENAI = bool(OPENAI_API_KEY)
+
 if USE_OPENAI:
-    from openai import OpenAI
-    # client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)  # proxies 같은 인자 넘기지 마세요
+    except Exception as e:
+        print("❌ OpenAI client init failed:", e)
+        USE_OPENAI = False  # 실패 시 템플릿 모드로 폴백
 print("USE_OPENAI =", USE_OPENAI)
 
 
