@@ -11,5 +11,6 @@ pytz>=2024.1                # 타임존 처리
 
 # (선택) LLM 요약 생성
 # openai>=1.42.0              # OpenAI API 호출
-openai==1.29.0
+# openai==1.29.0
+openai==1.38.0
 tiktoken>=0.7.0             # 토큰 계산
