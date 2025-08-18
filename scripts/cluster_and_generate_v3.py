@@ -16,7 +16,7 @@ from openai.types.chat.completion_create_params import ResponseFormat
 USE_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
 if USE_OPENAI:
     from openai import OpenAI
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    # client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 print("USE_OPENAI =", USE_OPENAI)
 
 
