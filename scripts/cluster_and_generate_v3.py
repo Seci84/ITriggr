@@ -16,8 +16,10 @@ from openai.types.chat.completion_create_params import ResponseFormat
 USE_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
 if USE_OPENAI:
     from openai import OpenAI
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    # client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), proxies=None)
 print("USE_OPENAI =", USE_OPENAI)
+
 
 # --- LLM 프롬프트: JSON만! (주석/코드펜스 금지) ---
 PROMPT = """You are a news rewrite assistant.
