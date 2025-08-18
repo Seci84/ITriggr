@@ -17,7 +17,6 @@ USE_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
 if USE_OPENAI:
     from openai import OpenAI
     # client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), proxies=None)
 print("USE_OPENAI =", USE_OPENAI)
 
 
