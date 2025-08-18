@@ -10,6 +10,7 @@ import traceback
 from collections import defaultdict
 from firebase_admin import firestore
 from common import init_db, log_event, sim_prefix
+from openai.types.chat.completion_create_params import ResponseFormat
 
 # --- OpenAI 사용 여부 ---
 USE_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
@@ -140,7 +141,8 @@ def run_once():
                     model="gpt-3.5-turbo",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
-                    response_format="json_object",
+                    # response_format="json_object",
+                    response_format=ResponseFormat.JSON_OBJECT,
                 )
                 latency_ms = int((time.time() - t0) * 1000)
 
