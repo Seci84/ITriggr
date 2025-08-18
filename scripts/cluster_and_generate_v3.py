@@ -147,7 +147,7 @@ def run_once():
                 t0 = time.time()
                 prompt = PROMPT.format(sources="\n".join(src_lines))
                 resp = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
+                    model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
                     # response_format="json_object",
@@ -171,7 +171,7 @@ def run_once():
                 print("🔎 LLM RESPONSE END")
 
                 payload = safe_parse_json(content)
-                model_used = "gpt-3.5-turbo"
+                model_used = "gpt-4o-mini"
 
             except Exception as e:
                 print("OpenAI error:", repr(e))
