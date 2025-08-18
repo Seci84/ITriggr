@@ -143,7 +143,7 @@ def run_once():
                 t0 = time.time()
                 prompt = PROMPT.format(sources="\n".join(src_lines))
                 resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-4o",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
                     response_format={"type": "json_object"},
@@ -162,7 +162,7 @@ def run_once():
                 if content is None and isinstance(resp.choices[0].message, dict):
                     content = resp.choices[0].message.get("content", "")
                 payload = safe_parse_json(content)
-                model_used = "gpt-4o-mini"
+                model_used = "gpt-4o"
             except Exception as e:
                 # 콘솔 + Firestore에 모두 기록 후 템플릿 유지
                 print("OpenAI error:", repr(e))
