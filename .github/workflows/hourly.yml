@@ -25,8 +25,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug OPENAI_API_KEY exists   # 👈 추가된 부분
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "❌ OPENAI_API_KEY is EMPTY"
+          else
+            echo "✅ OPENAI_API_KEY is SET (length: ${#OPENAI_API_KEY})"
+          fi
+
       - name: Fetch → raw_articles
         run: python scripts/fetch_news.py
 
       - name: Cluster & Generate → generated_articles
-        run: python scripts/cluster_and_generate.py
+        run: python scripts/cluster_and_generate.py 
+
+
