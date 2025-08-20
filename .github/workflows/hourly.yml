@@ -14,7 +14,7 @@ jobs:
       NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
       RSS_SOURCES: ${{ secrets.RSS_SOURCES }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      USE_OPENAI: "False"  # Explicitly set to bypass OpenAI client init
+      USE_OPENAI: "True"  # Enable LLM summarization
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
