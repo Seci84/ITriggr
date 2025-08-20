@@ -67,7 +67,7 @@ jobs:
 
       - name: Cluster and generate articles
         run: |
-          python scripts/cluster_and_generate_v3.py > cluster_generate.log 2>&1
+          python scripts/cluster_and_generate_v4.py > cluster_generate.log 2>&1
         continue-on-error: true
 
       - name: Upload logs for debugging
