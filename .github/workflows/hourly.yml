@@ -15,6 +15,9 @@ jobs:
       RSS_SOURCES: ${{ secrets.RSS_SOURCES }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       USE_OPENAI: "True"  # Enable LLM summarization
+      # 명시적으로 proxies 환경 변수 제거
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,6 +59,8 @@ jobs:
             echo "✅ OPENAI_API_KEY is SET (length: ${#OPENAI_API_KEY})"
           fi
           echo "USE_OPENAI is set to: $USE_OPENAI"
+          echo "HTTP_PROXY is set to: $HTTP_PROXY"
+          echo "HTTPS_PROXY is set to: $HTTPS_PROXY"
           python -c "import openai; print(f'OpenAI version: {openai.__version__}')"
           python -c "import httpx; print(f'httpx version: {httpx.__version__}')"
           python -c "import google.cloud.firestore; print(f'Firestore version: {google.cloud.firestore.__version__}')"
