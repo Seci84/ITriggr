@@ -78,6 +78,7 @@ def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
         it = d.to_dict() or {}
         k = sim_prefix(it.get("simhash", ""), prefix_bits=prefix_bits)
         groups[k].append((d.id, it))
+    print(f"Loaded {len(groups)} clusters from raw_articles")
     return groups
 
 def already_generated(db, cluster_key):
@@ -144,6 +145,7 @@ def run_once():
             try:
                 t0 = time.time()
                 prompt = PROMPT.format(sources="\n".join(src_lines))
+                print(f"Sending OpenAI request for cluster {cluster_key}")
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
@@ -195,6 +197,7 @@ def run_once():
         }
         db.collection("generated_articles").add(doc)
         created += 1
+        print(f"Generated article for cluster {cluster_key}, total created={created}")
 
     log_event(db, "generate_done", {"created": created})
     print(f"Found {len(groups)} clusters, generated={created}")
