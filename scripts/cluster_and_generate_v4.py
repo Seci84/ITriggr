@@ -8,7 +8,6 @@ from firebase_admin import firestore
 from common import init_db, log_event, sim_prefix
 from openai.types.chat.completion_create_params import ResponseFormat
 from openai import OpenAI
-import httpx
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 # --- OpenAI 사용 여부 ---
@@ -18,9 +17,8 @@ USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
 
 if OPENAI_API_KEY and USE_OPENAI:
     try:
-        http_client = httpx.Client(proxies=None)  # 명시적으로 proxies=None 설정
-        client = OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
-        print("✅ OpenAI client initialized successfully with proxies=None")
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        print("✅ OpenAI client initialized successfully")
     except Exception as e:
         print(f"❌ OpenAI client init failed: {e}")
         print("Full stack trace:")
