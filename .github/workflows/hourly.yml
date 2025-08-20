@@ -65,5 +65,5 @@ jobs:
         continue-on-error: true
 
       - name: Cluster and generate articles
-        run: python scripts/cluster_and_generate_v3.py
+        run: python scripts/cluster_and_generate_v4.py
         continue-on-error: true
