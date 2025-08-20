@@ -11,21 +11,21 @@ from openai import OpenAI
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 # --- OpenAI 사용 여부 ---
-
 client = None  # ✅ 항상 미리 정의
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or ""
-USE_OPENAI = bool(OPENAI_API_KEY)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
 
-if USE_OPENAI:
+if OPENAI_API_KEY and USE_OPENAI:
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)  # 기본 HTTP 클라이언트 사용
+        client = OpenAI(api_key=OPENAI_API_KEY)
         print("✅ OpenAI client initialized successfully")
     except Exception as e:
-        print("❌ OpenAI client init failed:", e)
+        print(f"❌ OpenAI client init failed: {e}")
         print("Full stack trace:")
         traceback.print_exc()
         USE_OPENAI = False
-print("USE_OPENAI =", USE_OPENAI)
+else:
+    print(f"USE_OPENAI = {USE_OPENAI}, OPENAI_API_KEY is {'set' if OPENAI_API_KEY else 'not set'}")
 
 # --- LLM 프롬프트: JSON만! (주석/코드펜스 금지) ---
 PROMPT = """You are a news rewrite assistant.
@@ -127,6 +127,7 @@ def run_once():
         if len(items) < 1:
             continue
         if already_generated(db, cluster_key):
+            print(f"Skipping cluster {cluster_key}: already generated")
             continue
 
         src_lines = []
@@ -145,7 +146,7 @@ def run_once():
             try:
                 t0 = time.time()
                 prompt = PROMPT.format(sources="\n".join(src_lines))
-                print(f"Sending OpenAI request for cluster {cluster_key}")
+                print(f"Sending OpenAI request for cluster {cluster_key} with {len(src_lines)} sources")
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
@@ -173,11 +174,12 @@ def run_once():
                 model_used = "gpt-4o-mini"
 
             except Exception as e:
-                print("OpenAI error:", repr(e))
+                print(f"OpenAI error for cluster {cluster_key}: {repr(e)}")
                 print("Trace:\n", traceback.format_exc())
                 log_event(db, "openai_error", {
                     "msg": str(e),
-                    "raw_content": content if 'content' in locals() else "N/A"
+                    "raw_content": content if 'content' in locals() else "N/A",
+                    "cluster_key": cluster_key
                 })
 
         doc = {
