@@ -7,7 +7,6 @@ from collections import defaultdict
 from firebase_admin import firestore
 from common import init_db, log_event, sim_prefix
 from openai.types.chat.completion_create_params import ResponseFormat
-import httpx
 from openai import OpenAI
 from google.cloud.firestore_v1.base_query import FieldFilter
 
@@ -19,17 +18,14 @@ USE_OPENAI = bool(OPENAI_API_KEY)
 
 if USE_OPENAI:
     try:
-        http_client = httpx.Client(proxies={})  # 프록시 비활성화
-        client = OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
-        print("✅ OpenAI client initialized successfully with proxies disabled")
-        print(f"httpx version: {httpx.__version__}")
+        client = OpenAI(api_key=OPENAI_API_KEY)  # 기본 HTTP 클라이언트 사용
+        print("✅ OpenAI client initialized successfully")
     except Exception as e:
         print("❌ OpenAI client init failed:", e)
         print("Full stack trace:")
         traceback.print_exc()
         USE_OPENAI = False
 print("USE_OPENAI =", USE_OPENAI)
-
 
 # --- LLM 프롬프트: JSON만! (주석/코드펜스 금지) ---
 PROMPT = """You are a news rewrite assistant.
@@ -56,7 +52,6 @@ Rules:
 Sources:
 {sources}
 """
-
 
 def safe_parse_json(content: str):
     """LLM 응답에서 JSON만 안전하게 추출."""
@@ -202,7 +197,7 @@ def run_once():
         created += 1
 
     log_event(db, "generate_done", {"created": created})
-    print(f"generated={created}")
+    print(f"Found {len(groups)} clusters, generated={created}")
 
 if __name__ == "__main__":
     run_once()
