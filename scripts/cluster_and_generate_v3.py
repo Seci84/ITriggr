@@ -11,6 +11,9 @@ from collections import defaultdict
 from firebase_admin import firestore
 from common import init_db, log_event, sim_prefix
 from openai.types.chat.completion_create_params import ResponseFormat
+import httpx
+from openai import OpenAI
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 # --- OpenAI 사용 여부 ---
 
@@ -20,11 +23,13 @@ USE_OPENAI = bool(OPENAI_API_KEY)
 
 if USE_OPENAI:
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)  # proxies 같은 인자 넘기지 마세요
+        http_client = httpx.Client(proxies={})  # 프록시 비활성화
+        client = OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
     except Exception as e:
         print("❌ OpenAI client init failed:", e)
-        USE_OPENAI = False  # 실패 시 템플릿 모드로 폴백
+        print("Full stack trace:")
+        traceback.print_exc()
+        USE_OPENAI = False
 print("USE_OPENAI =", USE_OPENAI)
 
 
@@ -74,7 +79,7 @@ def safe_parse_json(content: str):
 def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
     now = int(time.time())
     since = now - window_sec
-    q = db.collection("raw_articles").where("published_at", ">=", since)
+    q = db.collection("raw_articles").where(filter=FieldFilter("published_at", ">=", since))
     groups = defaultdict(list)
     for d in q.stream():
         it = d.to_dict() or {}
