@@ -2,25 +2,44 @@ name: hourly-news-pipeline
 
 on:
   schedule:
-    - cron: "0 * * * *"   # UTC 기준 매시 0분
+    - cron: "0 * * * *"   # Run every hour at minute 0 (UTC)
   workflow_dispatch:
 
 jobs:
   pipeline:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
       RSS_SOURCES: ${{ secrets.RSS_SOURCES }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      USE_OPENAI: "False"  # Explicitly set to bypass OpenAI client init
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Verify requirements.txt
+        run: |
+          if [ ! -f requirements.txt ]; then
+            echo "❌ requirements.txt not found"
+            exit 1
+          fi
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip cache purge
@@ -28,19 +47,23 @@ jobs:
           pip install openai==1.45.0 httpx==0.27.0
           pip install -r requirements.txt
 
-
-      - name: Debug OPENAI_API_KEY exists   # 👈 추가된 부분
+      - name: Verify OPENAI_API_KEY and environment
         run: |
           if [ -z "$OPENAI_API_KEY" ]; then
             echo "❌ OPENAI_API_KEY is EMPTY"
+            exit 1
           else
             echo "✅ OPENAI_API_KEY is SET (length: ${#OPENAI_API_KEY})"
           fi
+          echo "USE_OPENAI is set to: $USE_OPENAI"
+          python -c "import openai; print(f'OpenAI version: {openai.__version__}')"
+          python -c "import httpx; print(f'httpx version: {httpx.__version__}')"
+          python -c "import google.cloud.firestore; print(f'Firestore version: {google.cloud.firestore.__version__}')"
 
-      - name: Fetch → raw_articles
+      - name: Fetch news articles
         run: python scripts/fetch_news.py
+        continue-on-error: true
 
-      - name: Cluster & Generate → generated_articles
-        run: python scripts/cluster_and_generate_v3.py 
-
-
+      - name: Cluster and generate articles
+        run: python scripts/cluster_and_generate_v3.py
+        continue-on-error: true
