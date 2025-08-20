@@ -15,7 +15,6 @@ jobs:
       RSS_SOURCES: ${{ secrets.RSS_SOURCES }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       USE_OPENAI: "True"  # Enable LLM summarization
-      # 명시적으로 proxies 환경 변수 제거
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
     steps:
@@ -47,7 +46,7 @@ jobs:
           python -m pip install --upgrade pip
           pip cache purge
           pip uninstall -y openai || true
-          pip install openai==1.45.0 httpx==0.27.0
+          pip install openai==1.46.0 httpx>=0.28.0  # httpx 버전 업그레이드
           pip install -r requirements.txt
 
       - name: Verify environment
