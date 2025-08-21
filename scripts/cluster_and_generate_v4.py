@@ -17,7 +17,7 @@ USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
 
 if OPENAI_API_KEY and USE_OPENAI:
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = OpenAI(api_key=OPENAI_API_KEY)  # proxies 인자 제거
         print("✅ OpenAI client initialized successfully")
     except Exception as e:
         print(f"❌ OpenAI client init failed: {e}")
