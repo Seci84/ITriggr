@@ -151,7 +151,7 @@ def run_once():
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
-                    response_format=ResponseFormat.JSON_OBJECT,
+                    response_format={"type": "json_object"},
                 )
                 latency_ms = int((time.time() - t0) * 1000)
 
