@@ -100,7 +100,7 @@ def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
     return groups
 
 def already_generated(db, cluster_key):
-    snap = db.collection("generated_articles").where(filter=FieldFilter("cluster_key", "==", cluster_key)).limit(1).get()
+    snap = db.collection("generated_articles_v2").where(filter=FieldFilter("cluster_key", "==", cluster_key)).limit(1).get()
     return len(snap) > 0
 
 def make_payload_from_sources(items):
@@ -217,7 +217,7 @@ def run_once():
             "latency_ms": latency_ms,
             "created_at": firestore.SERVER_TIMESTAMP,
         }
-        db.collection("generated_articles").add(doc)
+        db.collection("generated_articles_v2").add(doc)
         created += 1
         print(f"Generated article for cluster {cluster_key}, total created={created}")
 
