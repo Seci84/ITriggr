@@ -158,7 +158,7 @@ def run_once():
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
 
-        payload = make_payload_from_sources(items)
+        payload = None  # 초기화
         token_usage = {"prompt": 0, "completion": 0}
         latency_ms = 0
         model_used = "template"
@@ -201,6 +201,15 @@ def run_once():
                     "raw_content": content if 'content' in locals() else "N/A",
                     "cluster_key": cluster_key
                 })
+                # GPT 실패 시 템플릿 사용
+                payload = make_payload_from_sources(items)
+
+        else:
+            # OpenAI 비활성화 시 템플릿 사용
+            payload = make_payload_from_sources(items)
+
+        if payload is None:
+            payload = make_payload_from_sources(items)  # 안전망
 
         doc = {
             "cluster_key": cluster_key,
@@ -217,7 +226,7 @@ def run_once():
             "latency_ms": latency_ms,
             "created_at": firestore.SERVER_TIMESTAMP,
         }
-        db.collection("generated_articles_v2").add(doc)
+        db.collection("generated_articles").add(doc)
         created += 1
         print(f"Generated article for cluster {cluster_key}, total created={created}")
 
@@ -226,3 +235,6 @@ def run_once():
 
 if __name__ == "__main__":
     run_once()
+
+
+
