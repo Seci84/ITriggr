@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import requests
 import json
@@ -82,8 +81,8 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
     """생성된 기사 우선(없으면 빈 리스트 반환)."""
     try:
         q = (db.collection("generated_articles")
-               .order_by("created_at", direction=firestore.Query.DESCENDING)
-               .limit(limit))
+             .order_by("created_at", direction=firestore.Query.DESCENDING)
+             .limit(limit))
         out = []
         for d in q.stream():
             x = d.to_dict() or {}
@@ -95,6 +94,7 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "published_at": (x.get("published_window", {}) or {}).get("end", 0),
                 "model": x.get("model", "n/a"),
+                "actions": x.get("actions", {"stock": [], "futures": [], "biz": []}),  # 추가
                 "__kind": "generated",
             })
         return out
@@ -107,8 +107,8 @@ def fetch_public(limit: int = 30) -> List[Dict]:
     """퍼블릭 기사(수동/테스트용)"""
     try:
         q = (db.collection("public_articles")
-               .order_by("published_at", direction=firestore.Query.DESCENDING)
-               .limit(limit))
+             .order_by("published_at", direction=firestore.Query.DESCENDING)
+             .limit(limit))
         out = []
         for d in q.stream():
             x = d.to_dict() or {}
@@ -139,22 +139,20 @@ def generate_actions(title: str, content: str) -> Dict:
     """OPENAI_API_KEY가 있으면 LLM, 없으면 템플릿."""
     if OPENAI_API_KEY:
         try:
-            # from openai import OpenAI
-            # client = OpenAI(api_key=OPENAI_API_KEY)
-            # prompt = (
-            #     f"[기사 제목]\n{title}\n\n[내용(요약 허용)]\n{content[:1500]}\n\n"
-            #     "주식/선물/비즈 각각에 대해 액션, 전제, 리스크, 대안을 간결 JSON으로:"
-            #     ' {"stock":[{"action":"","assumptions":"","risk":"","alternative":""}],'
-            #     '  "futures":[...], "biz":[...]}'
-            #     " 투자 자문 아님 톤, 과도한 확정 표현 금지."
-            # )
-            # resp = client.chat.completions.create(
-            #     model="gpt-4o-mini",
-            #     messages=[{"role":"user","content": prompt}],
-            #     temperature=0.3
-            # )
-            # return json.loads(resp.choices[0].message.content)
-            pass
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            prompt = (
+                f"[기사 제목]\n{title}\n\n[내용(요약 허용)]\n{content[:1500]}\n\n"
+                "주식/선물/비즈 각각에 대해 액션, 전제, 리스크, 대안을 간결 JSON으로:"
+                ' {"stock":[{"action":"","assumptions":"","risk":"","alternative":""}],'
+                '  "futures":[...], "biz":[...]}'
+                " 투자 자문 아님 톤, 과도한 확정 표현 금지."
+            )
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3
+            )
+            return json.loads(resp.choices[0].message.content)
         except Exception as e:
             st.warning(f"LLM 호출 실패(템플릿 사용): {e}")
 
@@ -180,8 +178,9 @@ def generate_actions(title: str, content: str) -> Dict:
         }]
     }
 
-def show_actions_ui(actions: Dict):
+def show_actions_ui(sel: Dict):
     st.subheader("🧭 액션 제안")
+    actions = sel.get("actions", generate_actions(sel["title"], sel.get("summary", "")))
     c1, c2, c3 = st.columns(3)
     blocks = [("📈 주식", "stock", c1), ("📉 선물/파생", "futures", c2), ("🏢 비즈니스", "biz", c3)]
     for title, key, col in blocks:
@@ -300,8 +299,7 @@ else:
                     for url in sel["evidence_urls"]:
                         st.write(f"- [{url}]({url})")
                 # 액션 제안
-                actions = generate_actions(sel["title"], sel.get("summary", ""))
-                show_actions_ui(actions)
+                show_actions_ui(sel)
 
             elif sel.get("__kind") == "public":
                 st.markdown(sel.get("body_md", ""))
@@ -310,5 +308,4 @@ else:
                     for url in sel["evidence_urls"]:
                         st.write(f"- [{url}]({url})")
                 # 액션 제안
-                actions = generate_actions(sel["title"], sel.get("body_md", ""))
-                show_actions_ui(actions)
+                show_actions_ui(sel)
