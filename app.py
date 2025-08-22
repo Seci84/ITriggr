@@ -261,7 +261,8 @@ gen = fetch_generated(limit=30)
 articles = gen if gen else fetch_public(limit=30)
 
 if gen:
-    st.success("데이터 소스: generated_articles")
+    st.success("데이터 소스: generated_articles_v2
+    ")
 else:
     st.warning("데이터 소스: public_articles (생성 기사가 아직 없거나 필터에 걸리지 않음)")
 
