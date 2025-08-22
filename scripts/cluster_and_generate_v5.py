@@ -226,7 +226,7 @@ def run_once():
             "latency_ms": latency_ms,
             "created_at": firestore.SERVER_TIMESTAMP,
         }
-        db.collection("generated_articles").add(doc)
+        db.collection("generated_articles_v2").add(doc)
         created += 1
         print(f"Generated article for cluster {cluster_key}, total created={created}")
 
