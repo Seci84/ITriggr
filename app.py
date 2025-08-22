@@ -80,7 +80,7 @@ def signout():
 def fetch_generated(limit: int = 30) -> List[Dict]:
     """생성된 기사 우선(없으면 빈 리스트 반환)."""
     try:
-        q = (db.collection("generated_articles")
+        q = (db.collection("generated_articles_v2")
              .order_by("created_at", direction=firestore.Query.DESCENDING)
              .limit(limit))
         out = []
