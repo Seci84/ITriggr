@@ -9,6 +9,8 @@ from common import init_db, log_event, sim_prefix
 from openai.types.chat.completion_create_params import ResponseFormat
 from openai import OpenAI
 from google.cloud.firestore_v1.base_query import FieldFilter
+import requests
+from bs4 import BeautifulSoup
 
 # --- OpenAI 사용 여부 ---
 client = None  # ✅ 항상 미리 정의
@@ -46,6 +48,7 @@ Required JSON shape:
 
 Rules:
 - Use available sources (one or more). Cite at least 1 item in "facts" with evidence_url chosen from the given Sources list.
+- Analyze the full content of each source URL to inform the title, summary, bullets, facts, and actions.
 - Cautious, factual tone. No guarantees/advice.
 - If mostly Korean sources, write Korean; otherwise English.
 
@@ -68,6 +71,21 @@ def safe_parse_json(content: str):
     if m:
         return json.loads(m.group(0))
     raise ValueError(f"JSON parse failed. head={content[:120]!r}")
+
+def fetch_content(url):
+    """URL에서 기사 본문 추출."""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # 간단한 본문 추출 (사이트별로 조정 필요)
+        paragraphs = soup.find_all('p')
+        content = ' '.join(p.get_text() for p in paragraphs if p.get_text().strip())
+        return content[:1000]  # 토큰 제한으로 1000자 제한
+    except Exception as e:
+        print(f"Failed to fetch content from {url}: {e}")
+        return "Content unavailable"
 
 def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
     now = int(time.time())
@@ -133,7 +151,10 @@ def run_once():
         src_lines = []
         ts_min, ts_max = 10 ** 12, 0
         for _id, it in items:
-            src_lines.append(f"- {it.get('title', '')} | {it.get('url', '')}")
+            url = it.get("url", "")
+            title = it.get("title", "")
+            content = fetch_content(url)  # URL에서 본문 가져오기
+            src_lines.append(f"- {title} | {url} | {content}")
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
 
@@ -165,7 +186,6 @@ def run_once():
                 if content is None and isinstance(resp.choices[0].message, dict):
                     content = resp.choices[0].message.get("content", "")
 
-                # ✅ 디버깅 출력
                 print("🔎 LLM RESPONSE START")
                 print(content)
                 print("🔎 LLM RESPONSE END")
@@ -189,7 +209,7 @@ def run_once():
             "bullets": payload.get("bullets", []),
             "facts": payload.get("facts", []),
             "actions": payload.get("actions", {"stock": [], "futures": [], "biz": []}),
-            "evidence_urls": [line.split("|")[-1].strip() for line in src_lines if "|" in line],
+            "evidence_urls": [line.split("|")[1].strip() for line in src_lines if "|" in line],
             "raw_refs": [x[0] for x in items],
             "published_window": {"start": ts_min, "end": ts_max},
             "model": model_used,
