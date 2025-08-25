@@ -20,17 +20,16 @@ import requests
 from bs4 import BeautifulSoup
 
 # --- OpenAI 사용 여부 ---
-client = None  # ✅ 항상 미리 정의
+client = None
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
 
 if OPENAI_API_KEY and USE_OPENAI:
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)  # proxies 인자 제거
+        client = OpenAI(api_key=OPENAI_API_KEY)
         print("✅ OpenAI client initialized successfully")
     except Exception as e:
         print(f"❌ OpenAI client init failed: {e}")
-        print("Full stack trace:")
         traceback.print_exc()
         USE_OPENAI = False
 else:
@@ -92,20 +91,19 @@ def safe_parse_json(content: str):
         return json.loads(m.group(0))
     raise ValueError(f"JSON parse failed. head={content[:120]!r}")
 
-def fetch_content(url):
+def fetch_content(url, items=None):
     """URL에서 기사 본문 추출."""
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        # 간단한 본문 추출 (사이트별로 조정 필요)
         paragraphs = soup.find_all('p')
         content = ' '.join(p.get_text() for p in paragraphs if p.get_text().strip())
-        return content[:1000]  # 토큰 제한으로 1000자 제한
+        return content[:1000]
     except Exception as e:
         print(f"Failed to fetch content from {url}: {e}")
-        return "Content unavailable"
+        return "Content unavailable (using title: " + (items[0][1].get("title", "Unknown") if items else "Unknown") + ")"
 
 def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
     now = int(time.time())
@@ -127,44 +125,24 @@ def make_payload_from_sources(items):
     n = len(items)
     title = f"[Auto] {n} source{'s' if n > 1 else ''} on same event"
     summary = (
-        "Multiple outlets reported a similar event. (Template summary: LLM disabled)"
+        "Multiple outlets reported a similar event. (Template summary)"
         if n > 1
-        else "A single source reported this event. (Template summary: LLM disabled)"
+        else "A single source reported this event. (Template summary)"
     )
-    bullets = ["Key point 1", "Key point 2", "Key point 3"]
     first = items[0][1] if items else {}
-    facts = [{"text": first.get("title", ""), "evidence_url": first.get("url", "")}]
+    bullets = [f"Event reported by {first.get('source', 'unknown')}", "Details unavailable", f"Source: {first.get('url', 'unknown')}"]
+    facts = [{"text": first.get("title", "No title"), "evidence_url": first.get("url", "")}]
     actions = {
-        "general": [{
-            "action": "Learn quantum computing via Coursera for roles like Astronautical Engineer at SpaceX",
-            "assumptions": "Tech advancement creates jobs",
-            "risk": "Skill obsolescence",
-            "alternative": "Join community forums"
-        }],
-        "entrepreneur": [{
-            "action": "Explore partnerships with Quantum Technologies for laser comm patents",
-            "assumptions": "Patent holders open for M&A",
-            "risk": "Access restrictions",
-            "alternative": "R&D investment"
-        }],
-        "politician": [{
-            "action": "Strengthen Space Policy Directives for quantum navigation",
-            "assumptions": "Gaps in international accords",
-            "risk": "International disputes",
-            "alternative": "Congressional hearings"
-        }],
-        "investor": [{
-            "action": "Invest in ARKX ETF for SpaceX exposure",
-            "assumptions": "Chained opportunities from Space Force missions",
-            "risk": "Management issues in ULA",
-            "alternative": "Diversified space funds"
-        }]
+        "general": [{"action": "Explore online tech courses", "assumptions": "Job growth possible", "risk": "Uncertain", "alternative": "Monitor news"}],
+        "entrepreneur": [{"action": "Check tech firm partnerships", "assumptions": "Innovation potential", "risk": "Uncertainty", "alternative": "Research"}],
+        "politician": [{"action": "Review tech policies", "assumptions": "Legislative needs", "risk": "Delay", "alternative": "Consult"}],
+        "investor": [{"action": "Monitor tech ETFs", "assumptions": "Market movement", "risk": "Volatility", "alternative": "Diversify"}]
     }
     insights = {
-        "general": "Career opportunities: Astronautical Engineer roles at SpaceX",
-        "entrepreneur": "Patent companies: Quantum Technologies",
-        "politician": "Related laws: Space Policy Directives",
-        "investor": "Challenged companies: Boeing facing management issues"
+        "general": "Potential tech career opportunities",
+        "entrepreneur": "Possible tech partnership opportunities",
+        "politician": "Tech policy consideration needed",
+        "investor": "Tech sector movement possible"
     }
     return {"title": title, "summary": summary, "bullets": bullets, "facts": facts, "insights": insights, "actions": actions}
 
@@ -184,13 +162,13 @@ def run_once():
         ts_min, ts_max = 10 ** 12, 0
         for _id, it in items:
             url = it.get("url", "")
-            title = it.get("title", "")
-            content = fetch_content(url)  # URL에서 본문 가져오기
+            title = it.get("title", "No title available")
+            content = fetch_content(url, items)
             src_lines.append(f"- {title} | {url} | {content}")
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
 
-        payload = None  # 초기화
+        payload = None
         token_usage = {"prompt": 0, "completion": 0}
         latency_ms = 0
         model_used = "template"
@@ -199,7 +177,7 @@ def run_once():
             try:
                 t0 = time.time()
                 prompt = PROMPT.format(sources="\n".join(src_lines))
-                print(f"Sending OpenAI request for cluster {cluster_key} with {len(src_lines)} sources")
+                print(f"Sending OpenAI request for cluster {cluster_key} with prompt: {prompt[:500]}...")
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
@@ -215,33 +193,31 @@ def run_once():
                     pass
 
                 content = getattr(resp.choices[0].message, "content", None)
-                if content is None and isinstance(resp.choices[0].message, dict):
-                    content = resp.choices[0].message.get("content", "")
-
-                print("🔎 LLM RESPONSE START")
-                print(content)
-                print("🔎 LLM RESPONSE END")
-
-                payload = safe_parse_json(content)
+                if content is None:
+                    print(f"⚠️ No content returned from OpenAI for cluster {cluster_key}")
+                    payload = make_payload_from_sources(items)
+                else:
+                    print("🔎 LLM RESPONSE START")
+                    print(content)
+                    print("🔎 LLM RESPONSE END")
+                    payload = safe_parse_json(content)
                 model_used = "gpt-4o-mini"
 
             except Exception as e:
                 print(f"OpenAI error for cluster {cluster_key}: {repr(e)}")
-                print("Trace:\n", traceback.format_exc())
+                traceback.print_exc()
                 log_event(db, "openai_error", {
                     "msg": str(e),
                     "raw_content": content if 'content' in locals() else "N/A",
                     "cluster_key": cluster_key
                 })
-                # GPT 실패 시 템플릿 사용
                 payload = make_payload_from_sources(items)
 
         else:
-            # OpenAI 비활성화 시 템플릿 사용
             payload = make_payload_from_sources(items)
 
         if payload is None:
-            payload = make_payload_from_sources(items)  # 안전망
+            payload = make_payload_from_sources(items)
 
         doc = {
             "cluster_key": cluster_key,
@@ -259,7 +235,7 @@ def run_once():
             "latency_ms": latency_ms,
             "created_at": firestore.SERVER_TIMESTAMP,
         }
-        db.collection("generated_articles_v3").add(doc)
+        db.collection("generated_articles_v3").add(doc)  # v2 -> v3 수정
         created += 1
         print(f"Generated article for cluster {cluster_key}, total created={created}")
 
