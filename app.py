@@ -1,10 +1,20 @@
+# 기사 목록을 위 아래로 나열 (최신 상단, order_by("created_at", DESCENDING) 유지).
+# 각 기사를 st.expander로 구현: 타이틀 클릭 시 확장, 요약, 핵심 포인트, 출처 표시.
+# 별도 페이지 대신 expander 사용 (단일 파일 유지, 필요 시 multi-page 확장 가능).
+# 제목: "Itriggr는 이런 액션을 할 것 같아요"로 변경.
+# reader_types 순서: general, entrepreneur, politician, investor.
+# 채팅창 스타일: st.chat_message("assistant")로 말풍선 형태로 출력.
+# insights: caption으로 표시.
+# actions: markdown으로 액션 나열.
+
 import streamlit as st
 import requests
 import json
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
-from datetime import datetime
+from datetime import datetime, UTC  # DeprecationWarning 처리
 from typing import List, Dict
+from openai import OpenAI  # LLM 호출 활성화
 
 st.set_page_config(page_title="ITRiggr - News", page_icon="📰", layout="wide")
 
@@ -80,7 +90,7 @@ def signout():
 def fetch_generated(limit: int = 30) -> List[Dict]:
     """생성된 기사 우선(없으면 빈 리스트 반환)."""
     try:
-        q = (db.collection("generated_articles_v2")
+        q = (db.collection("generated_articles")
              .order_by("created_at", direction=firestore.Query.DESCENDING)
              .limit(limit))
         out = []
@@ -94,7 +104,8 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "published_at": (x.get("published_window", {}) or {}).get("end", 0),
                 "model": x.get("model", "n/a"),
-                "actions": x.get("actions", {"stock": [], "futures": [], "biz": []}),  # 추가
+                "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),  # 추가
+                "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),  # 추가
                 "__kind": "generated",
             })
         return out
@@ -128,7 +139,7 @@ def fetch_public(limit: int = 30) -> List[Dict]:
 
 def ts_to_str(ts: int) -> str:
     try:
-        return datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M UTC")
+        return datetime.fromtimestamp(int(ts), UTC).strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
         return "-"
 
@@ -158,36 +169,51 @@ def generate_actions(title: str, content: str) -> Dict:
 
     # 템플릿(LLM 미사용 시)
     return {
-        "stock": [{
-            "action": "관련 섹터/종목을 워치리스트에 추가하고 거래량·뉴스 플로우 관찰",
-            "assumptions": "해당 이슈가 단기 모멘텀에 영향 가능",
-            "risk": "루머/오보·단기 과열",
-            "alternative": "공식 가이던스까지 분할 관찰/소액 접근"
-        }],
-        "futures": [{
-            "action": "섹터 ETF로 소규모 탐색 포지션(엄격한 손절 기준)",
-            "assumptions": "섹터가 뉴스에 베타 반응",
-            "risk": "거시 이벤트 역풍",
-            "alternative": "옵션 스프레드로 변동성 제한"
-        }],
-        "biz": [{
-            "action": "공급망/고객 커뮤니케이션 모니터링 및 가격·납기 재점검",
-            "assumptions": "분기 내 영향 가능",
-            "risk": "과잉 대응",
-            "alternative": "교차 확인 후 단계적 반영"
-        }]
+        "insights": {
+            "general": "Career opportunities: Astronautical Engineer roles at SpaceX",
+            "entrepreneur": "Patent companies: Quantum Technologies",
+            "politician": "Related laws: Space Policy Directives",
+            "investor": "Challenged companies: Boeing facing management issues"
+        },
+        "actions": {
+            "general": [{
+                "action": "Learn quantum computing via Coursera for roles like Astronautical Engineer at SpaceX",
+                "assumptions": "Tech advancement creates jobs",
+                "risk": "Skill obsolescence",
+                "alternative": "Join community forums"
+            }],
+            "entrepreneur": [{
+                "action": "Explore partnerships with Quantum Technologies for laser comm patents",
+                "assumptions": "Patent holders open for M&A",
+                "risk": "Access restrictions",
+                "alternative": "R&D investment"
+            }],
+            "politician": [{
+                "action": "Strengthen Space Policy Directives for quantum navigation",
+                "assumptions": "Gaps in international accords",
+                "risk": "International disputes",
+                "alternative": "Congressional hearings"
+            }],
+            "investor": [{
+                "action": "Invest in ARKX ETF for SpaceX exposure",
+                "assumptions": "Chained opportunities from Space Force missions",
+                "risk": "Management issues in ULA",
+                "alternative": "Diversified space funds"
+            }]
+        }
     }
 
 def show_actions_ui(sel: Dict):
-    st.subheader("🧭 액션 제안")
-    actions = sel.get("actions", generate_actions(sel["title"], sel.get("summary", "")))
-    c1, c2, c3 = st.columns(3)
-    blocks = [("📈 주식", "stock", c1), ("📉 선물/파생", "futures", c2), ("🏢 비즈니스", "biz", c3)]
-    for title, key, col in blocks:
-        with col:
-            st.markdown(f"**{title}**")
-            for a in actions.get(key, []):
-                st.markdown(f"- **가능한 액션**: {a['action']}")
+    st.subheader("Itriggr는 이런 액션을 할 것 같아요")
+    actions = sel.get("actions", {})
+    insights = sel.get("insights", {})
+    reader_types = ["general", "entrepreneur", "politician", "investor"]
+    for reader_type in reader_types:
+        with st.chat_message("assistant"):  # 채팅창처럼 말풍선 형태
+            st.markdown(f"**{reader_type.capitalize()} 유형에게:**")
+            st.caption(insights.get(reader_type, "No insights available"))
+            for a in actions.get(reader_type, []):
+                st.markdown(f"- **액션**: {a['action']}")
                 st.caption(f"전제: {a['assumptions']} | 리스크: {a['risk']} | 대안: {a['alternative']}")
 
 # ========================
@@ -261,51 +287,26 @@ gen = fetch_generated(limit=30)
 articles = gen if gen else fetch_public(limit=30)
 
 if gen:
-    st.success("데이터 소스: generated_articles_v2")
+    st.success("데이터 소스: generated_articles")
 else:
     st.warning("데이터 소스: public_articles (생성 기사가 아직 없거나 필터에 걸리지 않음)")
 
 if not articles:
     st.info("표시할 기사가 없습니다. 잠시 후 다시 시도하거나 파이프라인 실행을 확인해 주세요.")
 else:
-    left, right = st.columns([1, 2], gap="large")
-
-    def label(a: Dict) -> str:
-        when = ts_to_str(a.get("published_at", 0))
-        tag = "[GEN]" if a.get("__kind") == "generated" else "[PUB]"
-        return f"{tag} {a['title'][:120]} — {when}"
-
-    with left:
-        st.subheader("기사 목록")
-        options = {label(a): a["id"] for a in articles}
-        selected = st.selectbox("열람할 기사를 선택하세요", list(options.keys()))
-        selected_id = options[selected]
-
-    with right:
-        sel = next((a for a in articles if a["id"] == selected_id), None)
-        if sel:
-            st.subheader(sel["title"])
-            st.caption(ts_to_str(sel.get("published_at", 0)))
-
-            if sel.get("__kind") == "generated":
-                st.write(sel.get("summary", ""))
-                bullets = sel.get("bullets", [])
-                if bullets:
-                    st.markdown("**핵심 포인트:**")
-                    for b in bullets:
-                        st.markdown(f"- {b}")
-                if sel.get("evidence_urls"):
-                    st.markdown("**출처:**")
-                    for url in sel["evidence_urls"]:
-                        st.write(f"- [{url}]({url})")
-                # 액션 제안
-                show_actions_ui(sel)
-
-            elif sel.get("__kind") == "public":
-                st.markdown(sel.get("body_md", ""))
-                if sel.get("evidence_urls"):
-                    st.markdown("**출처:**")
-                    for url in sel["evidence_urls"]:
-                        st.write(f"- [{url}]({url})")
-                # 액션 제안
-                show_actions_ui(sel)
+    st.subheader("기사 목록")
+    for a in articles:
+        with st.expander(a["title"]):
+            st.caption(ts_to_str(a.get("published_at", 0)))
+            st.write(a.get("summary", ""))
+            bullets = a.get("bullets", [])
+            if bullets:
+                st.markdown("**핵심 포인트:**")
+                for b in bullets:
+                    st.markdown(f"- {b}")
+            if a.get("evidence_urls"):
+                st.markdown("**출처:**")
+                for url in a["evidence_urls"]:
+                    st.write(f"- [{url}]({url})")
+            # 액션 제안
+            show_actions_ui(a)
