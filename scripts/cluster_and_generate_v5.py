@@ -1,3 +1,10 @@
+# PROMPT를 이전에 제안한 고도화된 영문 프롬프트로 대체.
+# insights와 actions에 general, entrepreneur, politician, investor 필드 추가.
+# actions을 stock, futures, biz에서 general, entrepreneur, politician, investor로 변경.
+# insights 필드 추가로 각 유형별 부가 정보 제공 (예: 직업 기회, 특허 회사 등).
+# doc 딕셔너리에 insights와 actions의 새로운 구조 반영.
+# Firestore에 저장되는 데이터가 프롬프트 구조와 일치하도록 조정.
+
 import os
 import re
 import json
@@ -34,23 +41,36 @@ PROMPT = """You are a news rewrite assistant.
 Return ONLY a single JSON object. No code fences, no explanations, no comments.
 
 Required JSON shape:
-{{
+{
   "title": "string",
   "summary": "string",
   "bullets": ["string", "string", "string"],
-  "facts": [{{"text":"string","evidence_url":"string"}}],
-  "actions": {{
-    "stock":[{{"action":"","assumptions":"","risk":"","alternative":""}}],
-    "futures":[{{"action":"","assumptions":"","risk":"","alternative":""}}],
-    "biz":[{{"action":"","assumptions":"","risk":"","alternative":""}}]
-  }}
-}}
+  "facts": [{"text":"string","evidence_url":"string"}],
+  "insights": {
+    "general": "string",
+    "entrepreneur": "string",
+    "politician": "string",
+    "investor": "string"
+  },
+  "actions": {
+    "general": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "entrepreneur": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "politician": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "investor": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}]
+  }
+}
 
 Rules:
-- Use available sources (one or more). Cite at least 1 item in "facts" with evidence_url chosen from the given Sources list.
-- Analyze the full content of each source URL to inform the title, summary, bullets, facts, and actions.
-- Cautious, factual tone. No guarantees/advice.
+- Detect the category (politics, economy, society, tech, military, etc.) from the content and tailor the analysis to it (e.g., tech: focus on innovations, military: strategic implications).
+- Use available sources (one or more). Cite at least 1 item in "facts" with evidence_url chosen from the given Sources list. Be specific: name companies, products, or laws.
+- Analyze the full content of each source URL to inform the title, summary, bullets, facts, insights, and actions. Provide multi-faceted information: e.g., market size, specific examples, related entities.
+- Cautious, factual tone. No guarantees/advice. Use phrases like "possible idea" or "consider exploring".
 - If mostly Korean sources, write Korean; otherwise English.
+- For insights and actions, generate specific, concrete suggestions based on reader type:
+  - General: Suggest skill learning for career opportunities (e.g., "Learn quantum computing via Coursera for roles like Astronautical Engineer at SpaceX") and small investments (e.g., "Specific US ETF: ARKX or UFO with SpaceX exposure").
+  - Entrepreneur: Propose business opportunities like M&A or partnerships, naming specific companies (e.g., "Quantum Technologies for laser comm patents") and challenges (e.g., "Boeing's supply chain issues").
+  - Politician: Recommend legislation or diplomacy (e.g., "Strengthen Space Policy Directives for quantum navigation; address gaps in international accords like Artemis").
+  - Investor: Advise on stocks, chained opportunities, and troubled firms (e.g., "Invest in ARKX ETF for SpaceX exposure; ULA facing market share loss to SpaceX").
 
 Sources:
 {sources}
@@ -100,7 +120,7 @@ def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
     return groups
 
 def already_generated(db, cluster_key):
-    snap = db.collection("generated_articles_v2").where(filter=FieldFilter("cluster_key", "==", cluster_key)).limit(1).get()
+    snap = db.collection("generated_articles_v3").where(filter=FieldFilter("cluster_key", "==", cluster_key)).limit(1).get()
     return len(snap) > 0
 
 def make_payload_from_sources(items):
@@ -115,26 +135,38 @@ def make_payload_from_sources(items):
     first = items[0][1] if items else {}
     facts = [{"text": first.get("title", ""), "evidence_url": first.get("url", "")}]
     actions = {
-        "stock": [{
-            "action": "Watch related tickers",
-            "assumptions": "News momentum possible",
-            "risk": "Rumor/overreaction",
-            "alternative": "Stage entries"
+        "general": [{
+            "action": "Learn quantum computing via Coursera for roles like Astronautical Engineer at SpaceX",
+            "assumptions": "Tech advancement creates jobs",
+            "risk": "Skill obsolescence",
+            "alternative": "Join community forums"
         }],
-        "futures": [{
-            "action": "Small sector ETF probe",
-            "assumptions": "Sector beta to news",
-            "risk": "Macro shocks",
-            "alternative": "Options spread"
+        "entrepreneur": [{
+            "action": "Explore partnerships with Quantum Technologies for laser comm patents",
+            "assumptions": "Patent holders open for M&A",
+            "risk": "Access restrictions",
+            "alternative": "R&D investment"
         }],
-        "biz": [{
-            "action": "Monitor supplier/customer notes",
-            "assumptions": "Lead-time/price impact",
-            "risk": "Overreacting pre-confirmation",
-            "alternative": "Phase-in after cross-check"
+        "politician": [{
+            "action": "Strengthen Space Policy Directives for quantum navigation",
+            "assumptions": "Gaps in international accords",
+            "risk": "International disputes",
+            "alternative": "Congressional hearings"
         }],
+        "investor": [{
+            "action": "Invest in ARKX ETF for SpaceX exposure",
+            "assumptions": "Chained opportunities from Space Force missions",
+            "risk": "Management issues in ULA",
+            "alternative": "Diversified space funds"
+        }]
     }
-    return {"title": title, "summary": summary, "bullets": bullets, "facts": facts, "actions": actions}
+    insights = {
+        "general": "Career opportunities: Astronautical Engineer roles at SpaceX",
+        "entrepreneur": "Patent companies: Quantum Technologies",
+        "politician": "Related laws: Space Policy Directives",
+        "investor": "Challenged companies: Boeing facing management issues"
+    }
+    return {"title": title, "summary": summary, "bullets": bullets, "facts": facts, "insights": insights, "actions": actions}
 
 def run_once():
     db = init_db()
@@ -217,7 +249,8 @@ def run_once():
             "summary": payload.get("summary", ""),
             "bullets": payload.get("bullets", []),
             "facts": payload.get("facts", []),
-            "actions": payload.get("actions", {"stock": [], "futures": [], "biz": []}),
+            "insights": payload.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
+            "actions": payload.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
             "evidence_urls": [line.split("|")[1].strip() for line in src_lines if "|" in line],
             "raw_refs": [x[0] for x in items],
             "published_window": {"start": ts_min, "end": ts_max},
@@ -226,7 +259,7 @@ def run_once():
             "latency_ms": latency_ms,
             "created_at": firestore.SERVER_TIMESTAMP,
         }
-        db.collection("generated_articles_v2").add(doc)
+        db.collection("generated_articles_v3").add(doc)
         created += 1
         print(f"Generated article for cluster {cluster_key}, total created={created}")
 
@@ -235,6 +268,3 @@ def run_once():
 
 if __name__ == "__main__":
     run_once()
-
-
-
