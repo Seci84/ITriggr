@@ -12,9 +12,9 @@ import requests
 import json
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
-from datetime import datetime, UTC  # DeprecationWarning 처리
+from datetime import datetime, UTC
 from typing import List, Dict
-from openai import OpenAI  # LLM 호출 활성화
+from openai import OpenAI
 
 st.set_page_config(page_title="ITRiggr - News", page_icon="📰", layout="wide")
 
@@ -38,7 +38,7 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 WEB_API_KEY = st.secrets.get("FIREBASE_API_KEY")
-OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY")  # 선택
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY")
 
 # ========================
 # Auth REST endpoints
@@ -90,7 +90,7 @@ def signout():
 def fetch_generated(limit: int = 30) -> List[Dict]:
     """생성된 기사 우선(없으면 빈 리스트 반환)."""
     try:
-        q = (db.collection("generated_articles")
+        q = (db.collection("generated_articles_v3")  # v3로 변경
              .order_by("created_at", direction=firestore.Query.DESCENDING)
              .limit(limit))
         out = []
@@ -104,8 +104,8 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "published_at": (x.get("published_window", {}) or {}).get("end", 0),
                 "model": x.get("model", "n/a"),
-                "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),  # 추가
-                "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),  # 추가
+                "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
+                "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
                 "__kind": "generated",
             })
         return out
@@ -153,9 +153,10 @@ def generate_actions(title: str, content: str) -> Dict:
             client = OpenAI(api_key=OPENAI_API_KEY)
             prompt = (
                 f"[기사 제목]\n{title}\n\n[내용(요약 허용)]\n{content[:1500]}\n\n"
-                "주식/선물/비즈 각각에 대해 액션, 전제, 리스크, 대안을 간결 JSON으로:"
-                ' {"stock":[{"action":"","assumptions":"","risk":"","alternative":""}],'
-                '  "futures":[...], "biz":[...]}'
+                "general, entrepreneur, politician, investor 각각에 대해 액션, 전제, 리스크, 대안을 간결 JSON으로:"
+                ' {"insights":{"general":"string", "entrepreneur":"string", "politician":"string", "investor":"string"},'
+                '  "actions":{"general":[{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],'
+                '  "entrepreneur":[...], "politician":[...], "investor":[...]}}'
                 " 투자 자문 아님 톤, 과도한 확정 표현 금지."
             )
             resp = client.chat.completions.create(
@@ -209,7 +210,7 @@ def show_actions_ui(sel: Dict):
     insights = sel.get("insights", {})
     reader_types = ["general", "entrepreneur", "politician", "investor"]
     for reader_type in reader_types:
-        with st.chat_message("assistant"):  # 채팅창처럼 말풍선 형태
+        with st.chat_message("assistant"):
             st.markdown(f"**{reader_type.capitalize()} 유형에게:**")
             st.caption(insights.get(reader_type, "No insights available"))
             for a in actions.get(reader_type, []):
@@ -287,7 +288,7 @@ gen = fetch_generated(limit=30)
 articles = gen if gen else fetch_public(limit=30)
 
 if gen:
-    st.success("데이터 소스: generated_articles")
+    st.success("데이터 소스: generated_articles_v3")
 else:
     st.warning("데이터 소스: public_articles (생성 기사가 아직 없거나 필터에 걸리지 않음)")
 
@@ -308,5 +309,9 @@ else:
                 st.markdown("**출처:**")
                 for url in a["evidence_urls"]:
                     st.write(f"- [{url}]({url})")
-            # 액션 제안
+            # 액션 제안: Firestore 데이터가 없으면 동적 생성
+            if not a.get("insights") or not a.get("actions"):
+                actions_data = generate_actions(a["title"], a.get("summary", ""))
+                a["insights"] = actions_data.get("insights", a.get("insights", {}))
+                a["actions"] = actions_data.get("actions", a.get("actions", {}))
             show_actions_ui(a)
