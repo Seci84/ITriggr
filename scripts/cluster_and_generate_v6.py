@@ -39,7 +39,7 @@ else:
 PROMPT = """You are a news rewrite assistant.
 Return ONLY a single JSON object. No code fences, no explanations, no comments.
 
-Required JSON shape:
+Required JSON shape (all fields are mandatory):
 {
   "title": "string",
   "summary": "string",
@@ -60,6 +60,7 @@ Required JSON shape:
 }
 
 Rules:
+- Strictly adhere to the above JSON shape. All fields must be populated.
 - Detect the category (politics, economy, society, tech, military, etc.) from the content and tailor the analysis to it (e.g., tech: focus on innovations, military: strategic implications).
 - Use available sources (one or more). Cite at least 1 item in "facts" with evidence_url chosen from the given Sources list. Be specific: name companies, products, or laws.
 - Analyze the full content of each source URL to inform the title, summary, bullets, facts, insights, and actions. Provide multi-faceted information: e.g., market size, specific examples, related entities.
@@ -163,7 +164,7 @@ def run_once():
         for _id, it in items:
             url = it.get("url", "")
             title = it.get("title", "No title available")
-            content = fetch_content(url, items)
+            content = fetch_content(url)
             src_lines.append(f"- {title} | {url} | {content}")
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
@@ -201,7 +202,13 @@ def run_once():
                     print(content)
                     print("🔎 LLM RESPONSE END")
                     payload = safe_parse_json(content)
-                model_used = "gpt-4o-mini"
+                    # 구조 검증
+                    if not all(k in payload for k in ["insights", "actions"]) or \
+                       not all(k in payload["insights"] for k in ["general", "entrepreneur", "politician", "investor"]) or \
+                       not all(k in payload["actions"] for k in ["general", "entrepreneur", "politician", "investor"]):
+                        print(f"⚠️ Invalid structure for cluster {cluster_key}, using template")
+                        payload = make_payload_from_sources(items)
+                    model_used = "gpt-4o-mini"
 
             except Exception as e:
                 print(f"OpenAI error for cluster {cluster_key}: {repr(e)}")
@@ -235,7 +242,7 @@ def run_once():
             "latency_ms": latency_ms,
             "created_at": firestore.SERVER_TIMESTAMP,
         }
-        db.collection("generated_articles_v3").add(doc)  # v2 -> v3 수정
+        db.collection("generated_articles_v3").add(doc)
         created += 1
         print(f"Generated article for cluster {cluster_key}, total created={created}")
 
