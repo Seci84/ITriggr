@@ -39,7 +39,7 @@ else:
 PROMPT = """You are a news rewrite assistant.
 Return ONLY a single JSON object. No code fences, no explanations, no comments.
 
-Required JSON shape (all fields are mandatory):
+Required JSON shape (all fields are MANDATORY and must match exactly):
 {
   "title": "string",
   "summary": "string",
@@ -60,7 +60,7 @@ Required JSON shape (all fields are mandatory):
 }
 
 Rules:
-- Strictly adhere to the above JSON shape. All fields must be populated.
+- You MUST strictly adhere to the exact JSON shape above. Any deviation will result in rejection.
 - Detect the category (politics, economy, society, tech, military, etc.) from the content and tailor the analysis to it (e.g., tech: focus on innovations, military: strategic implications).
 - Use available sources (one or more). Cite at least 1 item in "facts" with evidence_url chosen from the given Sources list. Be specific: name companies, products, or laws.
 - Analyze the full content of each source URL to inform the title, summary, bullets, facts, insights, and actions. Provide multi-faceted information: e.g., market size, specific examples, related entities.
@@ -95,7 +95,9 @@ def safe_parse_json(content: str):
 def fetch_content(url, items=None):
     """URL에서 기사 본문 추출."""
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -113,9 +115,11 @@ def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
     groups = defaultdict(list)
     for d in q.stream():
         it = d.to_dict() or {}
-        k = sim_prefix(it.get("simhash", ""), prefix_bits=prefix_bits)
-        groups[k].append((d.id, it))
-    print(f"Loaded {len(groups)} clusters from raw_articles")
+        # NYT 제외 옵션 (선택적 활성화)
+        if "nytimes.com" not in it.get("url", ""):
+            k = sim_prefix(it.get("simhash", ""), prefix_bits=prefix_bits)
+            groups[k].append((d.id, it))
+    print(f"Loaded {len(groups)} clusters from raw_articles {'(NYT excluded)' if 'nytimes.com' not in it.get('url', '') else ''}")
     return groups
 
 def already_generated(db, cluster_key):
@@ -164,7 +168,7 @@ def run_once():
         for _id, it in items:
             url = it.get("url", "")
             title = it.get("title", "No title available")
-            content = fetch_content(url)
+            content = fetch_content(url, items)
             src_lines.append(f"- {title} | {url} | {content}")
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
@@ -176,9 +180,9 @@ def run_once():
 
         if USE_OPENAI and len(src_lines) >= 1:
             try:
-                t0 = time.time()
                 prompt = PROMPT.format(sources="\n".join(src_lines))
                 print(f"Sending OpenAI request for cluster {cluster_key} with prompt: {prompt[:500]}...")
+                t0 = time.time()
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
