@@ -32,24 +32,24 @@ else:
 PROMPT = """You are a news rewrite assistant. Return ONLY a single JSON object with no code fences, no explanations, and no comments.
 
 Required JSON shape (all fields are MANDATORY and must match exactly):
-{
+{{
   "title": "string",
   "summary": "string",
   "bullets": ["string", "string", "string"],
-  "facts": [{"text":"string","evidence_url":"string"}],
-  "insights": {
+  "facts": [{{"text":"string","evidence_url":"string"}}],
+  "insights": {{
     "general": "string",
     "entrepreneur": "string",
     "politician": "string",
     "investor": "string"
-  },
-  "actions": {
-    "general": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
-    "entrepreneur": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
-    "politician": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
-    "investor": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}]
-  }
-}
+  }},
+  "actions": {{
+    "general": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
+    "entrepreneur": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
+    "politician": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
+    "investor": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}]
+  }}
+}}
 
 Rules:
 - Strictly adhere to the exact JSON shape above. Any deviation (e.g., comments, code blocks, explanations) will result in rejection.
