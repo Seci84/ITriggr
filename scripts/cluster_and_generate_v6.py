@@ -36,8 +36,7 @@ else:
     print(f"USE_OPENAI = {USE_OPENAI}, OPENAI_API_KEY is {'set' if OPENAI_API_KEY else 'not set'}")
 
 # --- LLM 프롬프트: JSON만! (주석/코드펜스 금지) ---
-PROMPT = """You are a news rewrite assistant.
-Return ONLY a single JSON object. No code fences, no explanations, no comments.
+PROMPT = """You are a news rewrite assistant. Return ONLY a single JSON object with no code fences, no explanations, and no comments.
 
 Required JSON shape (all fields are MANDATORY and must match exactly):
 {
@@ -60,11 +59,11 @@ Required JSON shape (all fields are MANDATORY and must match exactly):
 }
 
 Rules:
-- You MUST strictly adhere to the exact JSON shape above. Any deviation will result in rejection.
+- Strictly adhere to the exact JSON shape above. Any deviation (e.g., comments, code blocks, explanations) will result in rejection.
 - Detect the category (politics, economy, society, tech, military, etc.) from the content and tailor the analysis to it (e.g., tech: focus on innovations, military: strategic implications).
 - Use available sources (one or more). Cite at least 1 item in "facts" with evidence_url chosen from the given Sources list. Be specific: name companies, products, or laws.
 - Analyze the full content of each source URL to inform the title, summary, bullets, facts, insights, and actions. Provide multi-faceted information: e.g., market size, specific examples, related entities.
-- Cautious, factual tone. No guarantees/advice. Use phrases like "possible idea" or "consider exploring".
+- Use a cautious, factual tone. No guarantees/advice. Use phrases like "possible idea" or "consider exploring".
 - If mostly Korean sources, write Korean; otherwise English.
 - For insights and actions, generate specific, concrete suggestions based on reader type:
   - General: Suggest skill learning for career opportunities (e.g., "Learn quantum computing via Coursera for roles like Astronautical Engineer at SpaceX") and small investments (e.g., "Specific US ETF: ARKX or UFO with SpaceX exposure").
@@ -79,17 +78,16 @@ Sources:
 def safe_parse_json(content: str):
     """LLM 응답에서 JSON만 안전하게 추출."""
     try:
+        # 코드블록 및 설명 제거
+        content = re.sub(r"^```(?:json)?\s*|\s*```$|^.*?: |^Explanation: .*", "", content.strip(), flags=re.MULTILINE)
         return json.loads(content)
     except Exception:
-        pass
-    content2 = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.I | re.M)
-    try:
-        return json.loads(content2)
-    except Exception:
-        pass
-    m = re.search(r"\{.*\}", content, flags=re.S)
-    if m:
-        return json.loads(m.group(0))
+        try:
+            m = re.search(r"\{.*\}", content, flags=re.DOTALL)
+            if m:
+                return json.loads(m.group(0))
+        except Exception:
+            pass
     raise ValueError(f"JSON parse failed. head={content[:120]!r}")
 
 def fetch_content(url, items=None):
@@ -106,7 +104,7 @@ def fetch_content(url, items=None):
         return content[:1000]
     except Exception as e:
         print(f"Failed to fetch content from {url}: {e}")
-        return "Content unavailable (using title: " + (items[0][1].get("title", "Unknown") if items else "Unknown") + ")"
+        return items[0][1].get("title", "No content available") if items else "No content available"
 
 def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
     now = int(time.time())
@@ -164,12 +162,16 @@ def run_once():
             continue
 
         src_lines = []
+        if not items:
+            src_lines.append("- No data available | N/A | No content")
+        else:
+            for _id, it in items:
+                url = it.get("url", "")
+                title = it.get("title", "No title available")
+                content = fetch_content(url, items)
+                src_lines.append(f"- {title} | {url} | {content}")
         ts_min, ts_max = 10 ** 12, 0
         for _id, it in items:
-            url = it.get("url", "")
-            title = it.get("title", "No title available")
-            content = fetch_content(url, items)
-            src_lines.append(f"- {title} | {url} | {content}")
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
 
@@ -180,8 +182,10 @@ def run_once():
 
         if USE_OPENAI and len(src_lines) >= 1:
             try:
+                print(f"Debug: src_lines for cluster {cluster_key}: {src_lines}")
                 prompt = PROMPT.format(sources="\n".join(src_lines))
-                print(f"Sending OpenAI request for cluster {cluster_key} with prompt: {prompt[:500]}...")
+                print(f"Debug: Generated prompt for cluster {cluster_key}: {prompt[:500]}")
+                print(f"Sending OpenAI request for cluster {cluster_key}...")
                 t0 = time.time()
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -190,6 +194,7 @@ def run_once():
                     response_format={"type": "json_object"},
                 )
                 latency_ms = int((time.time() - t0) * 1000)
+                print(f"Debug: Raw response for cluster {cluster_key}: {resp.choices[0].message.content}")
 
                 try:
                     token_usage["prompt"] = getattr(resp.usage, "prompt_tokens", 0)
