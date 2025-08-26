@@ -13,43 +13,46 @@ import requests
 from bs4 import BeautifulSoup
 
 # --- OpenAI 사용 여부 ---
-client = None
+client = None  # ✅ 항상 미리 정의
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
 
 if OPENAI_API_KEY and USE_OPENAI:
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = OpenAI(api_key=OPENAI_API_KEY)  # proxies 인자 제거
         print("✅ OpenAI client initialized successfully")
     except Exception as e:
         print(f"❌ OpenAI client init failed: {e}")
+        print("Full stack trace:")
         traceback.print_exc()
         USE_OPENAI = False
 else:
     print(f"USE_OPENAI = {USE_OPENAI}, OPENAI_API_KEY is {'set' if OPENAI_API_KEY else 'not set'}")
 
 # --- LLM 프롬프트: JSON만! (주석/코드펜스 금지) ---
+# UI 구조에 맞춰 insights/actions 스키마 확장 (general, entrepreneur, politician, investor)
+
 PROMPT = """You are a news rewrite assistant. Return ONLY a single JSON object with no code fences, no explanations, and no comments.
 
 Required JSON shape (all fields are MANDATORY and must match exactly):
-{{
+{
   "title": "string",
   "summary": "string",
   "bullets": ["string", "string", "string"],
-  "facts": [{{"text":"string","evidence_url":"string"}}],
-  "insights": {{
+  "facts": [{"text":"string","evidence_url":"string"}],
+  "insights": {
     "general": "string",
     "entrepreneur": "string",
     "politician": "string",
     "investor": "string"
-  }},
-  "actions": {{
-    "general": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
-    "entrepreneur": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
-    "politician": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
-    "investor": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}]
-  }}
-}}
+  },
+  "actions": {
+    "general": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "entrepreneur": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "politician": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "investor": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}]
+  }
+}
 
 Rules:
 - Strictly adhere to the exact JSON shape above. Any deviation (e.g., comments, code blocks, explanations) will result in rejection.
@@ -71,77 +74,128 @@ Sources:
 def safe_parse_json(content: str):
     """LLM 응답에서 JSON만 안전하게 추출."""
     try:
-        # 코드블록 및 설명 제거
-        content = re.sub(r"^```(?:json)?\s*|\s*```$|^.*?: |^Explanation: .*", "", content.strip(), flags=re.MULTILINE)
-        # JSON 객체 처리 시도
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            # 객체 추출 시도
-            match = re.search(r"\{(?:[^{}]|(?R))*\}", content, flags=re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-    except Exception as e:
-        print(f"Debug: Failed to parse JSON - Error: {e}, Content: {content[:500]}")
+        return json.loads(content)
+    except Exception:
+        pass
+    content2 = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.I | re.M)
+    try:
+        return json.loads(content2)
+    except Exception:
+        pass
+    m = re.search(r"\{.*\}", content, flags=re.S)
+    if m:
+        return json.loads(m.group(0))
     raise ValueError(f"JSON parse failed. head={content[:120]!r}")
 
-def fetch_content(url, items=None):
+def fetch_content(url):
     """URL에서 기사 본문 추출."""
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
+        # 간단한 본문 추출 (사이트별로 조정 필요)
         paragraphs = soup.find_all('p')
         content = ' '.join(p.get_text() for p in paragraphs if p.get_text().strip())
-        return content[:1000]
+        return content[:1000]  # 토큰 제한으로 1000자 제한
     except Exception as e:
         print(f"Failed to fetch content from {url}: {e}")
-        return items[0][1].get("title", "No content available") if items else "No content available"
+        return "Content unavailable"
 
-def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
+from urllib.parse import urlparse
+
+def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16,
+                           exclude_domains=("nytimes.com", "nyti.ms")):
+    """
+    최근 원문 기사들을 simhash prefix로 클러스터링.
+    NYT 도메인(nytimes.com, nyti.ms)은 제외.
+    """
+    def _is_excluded(url: str) -> bool:
+        try:
+            host = urlparse(url or "").netloc.lower()
+            if not host:
+                return False
+            # example: sub.domain.nytimes.com 도 함께 제외
+            return any(host == d or host.endswith("." + d) for d in exclude_domains)
+        except Exception:
+            return False
+
     now = int(time.time())
     since = now - window_sec
     q = db.collection("raw_articles").where(filter=FieldFilter("published_at", ">=", since))
     groups = defaultdict(list)
+
+    total, skipped = 0, 0
     for d in q.stream():
         it = d.to_dict() or {}
-        if "nytimes.com" not in it.get("url", ""):  # NYT 제외 활성화
-            k = sim_prefix(it.get("simhash", ""), prefix_bits=prefix_bits)
-            groups[k].append((d.id, it))
-    print(f"Loaded {len(groups)} clusters from raw_articles (NYT excluded)")
+        total += 1
+        url = it.get("url", "") or ""
+        if _is_excluded(url):
+            skipped += 1
+            continue
+
+        k = sim_prefix(it.get("simhash", ""), prefix_bits=prefix_bits)
+        groups[k].append((d.id, it))
+
+    print(f"Loaded {len(groups)} clusters from raw_articles (total_docs={total}, skipped_nyt={skipped})")
     return groups
 
-def already_generated(db, cluster_key):
-    snap = db.collection("generated_articles_v3").where(filter=FieldFilter("cluster_key", "==", cluster_key)).limit(1).get()
-    return len(snap) > 0
 
 def make_payload_from_sources(items):
+    """OPENAI 비활성/실패 시 UI가 바로 쓸 수 있는 템플릿 페이로드."""
     n = len(items)
     title = f"[Auto] {n} source{'s' if n > 1 else ''} on same event"
     summary = (
-        "Multiple outlets reported a similar event. (Template summary)"
+        "Multiple outlets reported a similar event. (Template summary: LLM disabled)"
         if n > 1
-        else "A single source reported this event. (Template summary)"
+        else "A single source reported this event. (Template summary: LLM disabled)"
     )
+    bullets = ["Key point 1", "Key point 2", "Key point 3"]
     first = items[0][1] if items else {}
-    bullets = [f"Event reported by {first.get('source', 'unknown')}", "Details unavailable", f"Source: {first.get('url', 'unknown')}"]
-    facts = [{"text": first.get("title", "No title"), "evidence_url": first.get("url", "")}]
-    actions = {
-        "general": [{"action": "Explore online tech courses", "assumptions": "Job growth possible", "risk": "Uncertain", "alternative": "Monitor news"}],
-        "entrepreneur": [{"action": "Check tech firm partnerships", "assumptions": "Innovation potential", "risk": "Uncertainty", "alternative": "Research"}],
-        "politician": [{"action": "Review tech policies", "assumptions": "Legislative needs", "risk": "Delay", "alternative": "Consult"}],
-        "investor": [{"action": "Monitor tech ETFs", "assumptions": "Market movement", "risk": "Volatility", "alternative": "Diversify"}]
-    }
+    facts = [{"text": first.get("title", ""), "evidence_url": first.get("url", "")}]
+
+    # ✅ UI가 요구하는 reader_types에 맞춰 기본 insights/actions 채우기
     insights = {
-        "general": "Potential tech career opportunities",
-        "entrepreneur": "Possible tech partnership opportunities",
-        "politician": "Tech policy consideration needed",
-        "investor": "Tech sector movement possible"
+        "general": "이 이슈는 일상 생활/직장 환경에 점진적 영향을 미칠 수 있습니다.",
+        "entrepreneur": "시장 공백과 규제 변화에서 초기 진입 기회를 탐색하십시오.",
+        "politician": "법/규제 업데이트 필요성과 국제 공조 이슈를 점검하십시오.",
+        "investor": "테마/섹터 리스크와 펀더멘털 괴리를 구분해 모니터링하십시오."
     }
-    return {"title": title, "summary": summary, "bullets": bullets, "facts": facts, "insights": insights, "actions": actions}
+    actions = {
+        "general": [{
+            "action": "공식 보도자료 및 정부 발표를 팔로업해 핵심 변경사항 파악",
+            "assumptions": "정책/기업 발표가 실제 행동으로 이어질 가능성",
+            "risk": "초기 보도 과장 또는 정정 보도",
+            "alternative": "전문가 뉴스레터 구독으로 2차 검증"
+        }],
+        "entrepreneur": [{
+            "action": "고객 페인포인트 인터뷰 및 린 프로토타입 테스트",
+            "assumptions": "이슈가 실수요 문제를 유발/확대",
+            "risk": "시장 수요 과대평가",
+            "alternative": "PoC/파일럿으로 리스크 분산"
+        }],
+        "politician": [{
+            "action": "이해관계자 간담회 개최 및 영향평가(규제/고용/안전) 착수",
+            "assumptions": "정책 개입 여지 존재",
+            "risk": "정치적 반발/예산 제약",
+            "alternative": "권고안/가이드라인부터 단계적 추진"
+        }],
+        "investor": [{
+            "action": "섹터 ETF로 테마 익스포저 소규모 실험",
+            "assumptions": "뉴스 모멘텀이 단기 가격 변동 유발",
+            "risk": "거시 변수에 의한 역풍",
+            "alternative": "현금비중/헷지로 변동성 관리"
+        }]
+    }
+
+    return {
+        "title": title,
+        "summary": summary,
+        "bullets": bullets,
+        "facts": facts,
+        "insights": insights,
+        "actions": actions
+    }
 
 def run_once():
     db = init_db()
@@ -156,32 +210,25 @@ def run_once():
             continue
 
         src_lines = []
-        if not items:
-            src_lines.append("- No data available | N/A | No content")
-        else:
-            for _id, it in items:
-                url = it.get("url", "").replace("{", "{{").replace("}", "}}")  # URL 이스케이프
-                title = it.get("title", "No title available").replace("{", "{{").replace("}", "}}")  # Title 이스케이프
-                content = fetch_content(url, items).replace("{", "{{").replace("}", "}}")  # Content 이스케이프
-                src_lines.append(f"- {title} | {url} | {content}")
         ts_min, ts_max = 10 ** 12, 0
         for _id, it in items:
+            url = it.get("url", "")
+            title = it.get("title", "")
+            content = fetch_content(url)  # URL에서 본문 가져오기
+            src_lines.append(f"- {title} | {url} | {content}")
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
 
-        payload = None
+        payload = None  # 초기화
         token_usage = {"prompt": 0, "completion": 0}
         latency_ms = 0
         model_used = "template"
 
         if USE_OPENAI and len(src_lines) >= 1:
             try:
-                print(f"Debug: PROMPT template: {PROMPT[:500]}")
-                print(f"Debug: src_lines for cluster {cluster_key}: {src_lines}")
-                prompt = PROMPT.format(sources="\n".join(src_lines))
-                print(f"Debug: Generated prompt for cluster {cluster_key}: {prompt[:1000]}")
-                print(f"Sending OpenAI request for cluster {cluster_key}...")
                 t0 = time.time()
+                prompt = PROMPT.format(sources="\n".join(src_lines))
+                print(f"Sending OpenAI request for cluster {cluster_key} with {len(src_lines)} sources")
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
@@ -189,7 +236,6 @@ def run_once():
                     response_format={"type": "json_object"},
                 )
                 latency_ms = int((time.time() - t0) * 1000)
-                print(f"Debug: Raw response for cluster {cluster_key}: {resp.choices[0].message.content[:1000]}")
 
                 try:
                     token_usage["prompt"] = getattr(resp.usage, "prompt_tokens", 0)
@@ -198,46 +244,48 @@ def run_once():
                     pass
 
                 content = getattr(resp.choices[0].message, "content", None)
-                if content is None:
-                    print(f"⚠️ No content returned from OpenAI for cluster {cluster_key}")
-                    payload = make_payload_from_sources(items)
-                else:
-                    print("🔎 LLM RESPONSE START")
-                    print(content[:1000])
-                    print("🔎 LLM RESPONSE END")
-                    payload = safe_parse_json(content)
-                    # 구조 검증
-                    if not all(k in payload for k in ["insights", "actions"]) or \
-                       not all(k in payload["insights"] for k in ["general", "entrepreneur", "politician", "investor"]) or \
-                       not all(k in payload["actions"] for k in ["general", "entrepreneur", "politician", "investor"]):
-                        print(f"⚠️ Invalid structure for cluster {cluster_key}, using template")
-                        payload = make_payload_from_sources(items)
-                    model_used = "gpt-4o-mini"
+                if content is None and isinstance(resp.choices[0].message, dict):
+                    content = resp.choices[0].message.get("content", "")
+
+                print("🔎 LLM RESPONSE START")
+                print(content)
+                print("🔎 LLM RESPONSE END")
+
+                payload = safe_parse_json(content)
+                model_used = "gpt-4o-mini"
 
             except Exception as e:
                 print(f"OpenAI error for cluster {cluster_key}: {repr(e)}")
-                traceback.print_exc()
+                print("Trace:\n", traceback.format_exc())
                 log_event(db, "openai_error", {
                     "msg": str(e),
                     "raw_content": content if 'content' in locals() else "N/A",
                     "cluster_key": cluster_key
                 })
+                # GPT 실패 시 템플릿 사용
                 payload = make_payload_from_sources(items)
 
         else:
+            # OpenAI 비활성화 시 템플릿 사용
             payload = make_payload_from_sources(items)
 
         if payload is None:
-            payload = make_payload_from_sources(items)
+            payload = make_payload_from_sources(items)  # 안전망
 
+        # Firestore 문서 구성 (UI가 읽는 필드 포함)
         doc = {
             "cluster_key": cluster_key,
             "title": payload.get("title", ""),
             "summary": payload.get("summary", ""),
             "bullets": payload.get("bullets", []),
             "facts": payload.get("facts", []),
-            "insights": payload.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
-            "actions": payload.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
+            # ✅ UI에서 사용하는 필드 추가
+            "insights": payload.get("insights", {
+                "general": "", "entrepreneur": "", "politician": "", "investor": ""
+            }),
+            "actions": payload.get("actions", {
+                "general": [], "entrepreneur": [], "politician": [], "investor": []
+            }),
             "evidence_urls": [line.split("|")[1].strip() for line in src_lines if "|" in line],
             "raw_refs": [x[0] for x in items],
             "published_window": {"start": ts_min, "end": ts_max},
@@ -246,6 +294,8 @@ def run_once():
             "latency_ms": latency_ms,
             "created_at": firestore.SERVER_TIMESTAMP,
         }
+
+        # ✅ 컬렉션 이름을 v3로 저장 (UI와 일치)
         db.collection("generated_articles_v3").add(doc)
         created += 1
         print(f"Generated article for cluster {cluster_key}, total created={created}")
