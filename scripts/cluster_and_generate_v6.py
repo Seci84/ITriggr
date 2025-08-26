@@ -1,10 +1,3 @@
-# PROMPT를 이전에 제안한 고도화된 영문 프롬프트로 대체.
-# insights와 actions에 general, entrepreneur, politician, investor 필드 추가.
-# actions을 stock, futures, biz에서 general, entrepreneur, politician, investor로 변경.
-# insights 필드 추가로 각 유형별 부가 정보 제공 (예: 직업 기회, 특허 회사 등).
-# doc 딕셔너리에 insights와 actions의 새로운 구조 반영.
-# Firestore에 저장되는 데이터가 프롬프트 구조와 일치하도록 조정.
-
 import os
 import re
 import json
@@ -13,7 +6,7 @@ import traceback
 from collections import defaultdict
 from firebase_admin import firestore
 from common import init_db, log_event, sim_prefix
-from openai.types.chat.completion_create_params import ResponseFormat
+#from openai.types.chat.completion_create_params import ResponseFormat
 from openai import OpenAI
 from google.cloud.firestore_v1.base_query import FieldFilter
 import requests
@@ -39,24 +32,24 @@ else:
 PROMPT = """You are a news rewrite assistant. Return ONLY a single JSON object with no code fences, no explanations, and no comments.
 
 Required JSON shape (all fields are MANDATORY and must match exactly):
-{{
+{
   "title": "string",
   "summary": "string",
   "bullets": ["string", "string", "string"],
-  "facts": [{{"text":"string","evidence_url":"string"}}],
-  "insights": {{
+  "facts": [{"text":"string","evidence_url":"string"}],
+  "insights": {
     "general": "string",
     "entrepreneur": "string",
     "politician": "string",
     "investor": "string"
-  }},
-  "actions": {{
-    "general": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
-    "entrepreneur": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
-    "politician": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}],
-    "investor": [{{"action":"string","assumptions":"string","risk":"string","alternative":"string"}}]
-  }}
-}}
+  },
+  "actions": {
+    "general": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "entrepreneur": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "politician": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],
+    "investor": [{"action":"string","assumptions":"string","risk":"string","alternative":"string"}]
+  }
+}
 
 Rules:
 - Strictly adhere to the exact JSON shape above. Any deviation (e.g., comments, code blocks, explanations) will result in rejection.
@@ -80,14 +73,20 @@ def safe_parse_json(content: str):
     try:
         # 코드블록 및 설명 제거
         content = re.sub(r"^```(?:json)?\s*|\s*```$|^.*?: |^Explanation: .*", "", content.strip(), flags=re.MULTILINE)
-        return json.loads(content)
-    except Exception:
+        # JSON 배열이나 객체 처리 시도
         try:
-            m = re.search(r"\{.*\}", content, flags=re.DOTALL)
-            if m:
-                return json.loads(m.group(0))
-        except Exception:
-            pass
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # 객체 추출 시도
+            match = re.search(r"\{(?:[^{}]|(?R))*\}", content, flags=re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+            # 배열 추출 시도
+            match = re.search(r"\[(?:[^\[\]]|(?R))*\]", content, flags=re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+    except Exception as e:
+        print(f"Debug: Failed to parse JSON - Error: {e}, Content: {content[:500]}")
     raise ValueError(f"JSON parse failed. head={content[:120]!r}")
 
 def fetch_content(url, items=None):
@@ -113,11 +112,10 @@ def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16):
     groups = defaultdict(list)
     for d in q.stream():
         it = d.to_dict() or {}
-        # NYT 제외 옵션 (선택적 활성화)
-        if "nytimes.com" not in it.get("url", ""):
+        if "nytimes.com" not in it.get("url", ""):  # NYT 제외 활성화
             k = sim_prefix(it.get("simhash", ""), prefix_bits=prefix_bits)
             groups[k].append((d.id, it))
-    print(f"Loaded {len(groups)} clusters from raw_articles {'(NYT excluded)' if 'nytimes.com' not in it.get('url', '') else ''}")
+    print(f"Loaded {len(groups)} clusters from raw_articles (NYT excluded)")
     return groups
 
 def already_generated(db, cluster_key):
@@ -167,7 +165,7 @@ def run_once():
         else:
             for _id, it in items:
                 url = it.get("url", "")
-                title = it.get("title", "No title available")
+                title = it.get("title", "No title available").replace("{", "{{").replace("}", "}}")  # 플레이스홀더 이스케이프
                 content = fetch_content(url, items)
                 src_lines.append(f"- {title} | {url} | {content}")
         ts_min, ts_max = 10 ** 12, 0
@@ -184,7 +182,7 @@ def run_once():
             try:
                 print(f"Debug: src_lines for cluster {cluster_key}: {src_lines}")
                 prompt = PROMPT.format(sources="\n".join(src_lines))
-                print(f"Debug: Generated prompt for cluster {cluster_key}: {prompt[:500]}")
+                print(f"Debug: Generated prompt for cluster {cluster_key}: {prompt[:1000]}")  # 더 긴 출력
                 print(f"Sending OpenAI request for cluster {cluster_key}...")
                 t0 = time.time()
                 resp = client.chat.completions.create(
@@ -194,7 +192,7 @@ def run_once():
                     response_format={"type": "json_object"},
                 )
                 latency_ms = int((time.time() - t0) * 1000)
-                print(f"Debug: Raw response for cluster {cluster_key}: {resp.choices[0].message.content}")
+                print(f"Debug: Raw response for cluster {cluster_key}: {resp.choices[0].message.content[:1000]}")  # 전체 응답 일부 출력
 
                 try:
                     token_usage["prompt"] = getattr(resp.usage, "prompt_tokens", 0)
@@ -208,7 +206,7 @@ def run_once():
                     payload = make_payload_from_sources(items)
                 else:
                     print("🔎 LLM RESPONSE START")
-                    print(content)
+                    print(content[:1000])  # 전체 응답 일부 출력
                     print("🔎 LLM RESPONSE END")
                     payload = safe_parse_json(content)
                     # 구조 검증
