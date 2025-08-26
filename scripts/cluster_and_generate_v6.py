@@ -140,6 +140,21 @@ def load_recent_raw_groups(db, window_sec=6 * 60 * 60, prefix_bits=16,
     print(f"Loaded {len(groups)} clusters from raw_articles (total_docs={total}, skipped_nyt={skipped})")
     return groups
 
+def already_generated(db, cluster_key: str) -> bool:
+    """
+    특정 cluster_key에 대해 이미 생성된 문서가 있는지 확인.
+    (generated_articles_v3 기준)
+    """
+    try:
+        snap = (db.collection("generated_articles_v3")
+                  .where(filter=FieldFilter("cluster_key", "==", cluster_key))
+                  .limit(1)
+                  .get())
+        return len(snap) > 0
+    except Exception as e:
+        print(f"already_generated check failed: {e}")
+        return False
+
 
 def make_payload_from_sources(items):
     """OPENAI 비활성/실패 시 UI가 바로 쓸 수 있는 템플릿 페이로드."""
