@@ -6,7 +6,7 @@ import traceback
 from collections import defaultdict
 from firebase_admin import firestore
 from common import init_db, log_event, sim_prefix
-#from openai.types.chat.completion_create_params import ResponseFormat
+from openai.types.chat.completion_create_params import ResponseFormat
 from openai import OpenAI
 from google.cloud.firestore_v1.base_query import FieldFilter
 import requests
@@ -73,16 +73,12 @@ def safe_parse_json(content: str):
     try:
         # 코드블록 및 설명 제거
         content = re.sub(r"^```(?:json)?\s*|\s*```$|^.*?: |^Explanation: .*", "", content.strip(), flags=re.MULTILINE)
-        # JSON 배열이나 객체 처리 시도
+        # JSON 객체 처리 시도
         try:
             return json.loads(content)
         except json.JSONDecodeError:
             # 객체 추출 시도
             match = re.search(r"\{(?:[^{}]|(?R))*\}", content, flags=re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-            # 배열 추출 시도
-            match = re.search(r"\[(?:[^\[\]]|(?R))*\]", content, flags=re.DOTALL)
             if match:
                 return json.loads(match.group(0))
     except Exception as e:
@@ -164,9 +160,9 @@ def run_once():
             src_lines.append("- No data available | N/A | No content")
         else:
             for _id, it in items:
-                url = it.get("url", "")
-                title = it.get("title", "No title available").replace("{", "{{").replace("}", "}}")  # 플레이스홀더 이스케이프
-                content = fetch_content(url, items)
+                url = it.get("url", "").replace("{", "{{").replace("}", "}}")  # URL 이스케이프
+                title = it.get("title", "No title available").replace("{", "{{").replace("}", "}}")  # Title 이스케이프
+                content = fetch_content(url, items).replace("{", "{{").replace("}", "}}")  # Content 이스케이프
                 src_lines.append(f"- {title} | {url} | {content}")
         ts_min, ts_max = 10 ** 12, 0
         for _id, it in items:
@@ -180,9 +176,10 @@ def run_once():
 
         if USE_OPENAI and len(src_lines) >= 1:
             try:
+                print(f"Debug: PROMPT template: {PROMPT[:500]}")
                 print(f"Debug: src_lines for cluster {cluster_key}: {src_lines}")
                 prompt = PROMPT.format(sources="\n".join(src_lines))
-                print(f"Debug: Generated prompt for cluster {cluster_key}: {prompt[:1000]}")  # 더 긴 출력
+                print(f"Debug: Generated prompt for cluster {cluster_key}: {prompt[:1000]}")
                 print(f"Sending OpenAI request for cluster {cluster_key}...")
                 t0 = time.time()
                 resp = client.chat.completions.create(
@@ -192,7 +189,7 @@ def run_once():
                     response_format={"type": "json_object"},
                 )
                 latency_ms = int((time.time() - t0) * 1000)
-                print(f"Debug: Raw response for cluster {cluster_key}: {resp.choices[0].message.content[:1000]}")  # 전체 응답 일부 출력
+                print(f"Debug: Raw response for cluster {cluster_key}: {resp.choices[0].message.content[:1000]}")
 
                 try:
                     token_usage["prompt"] = getattr(resp.usage, "prompt_tokens", 0)
@@ -206,7 +203,7 @@ def run_once():
                     payload = make_payload_from_sources(items)
                 else:
                     print("🔎 LLM RESPONSE START")
-                    print(content[:1000])  # 전체 응답 일부 출력
+                    print(content[:1000])
                     print("🔎 LLM RESPONSE END")
                     payload = safe_parse_json(content)
                     # 구조 검증
