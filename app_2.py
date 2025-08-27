@@ -61,6 +61,19 @@ st.markdown("""
   margin-top: 0.8rem;
   margin-bottom: 0.2rem;
 }
+
+/* 카드 마커를 가진 컨테이너를 카드처럼 보이게 */
+div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) {
+  border: 1px solid #eaeaea;
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+/* 마커 자체는 보이지 않게 */
+.itr-card-marker { display: none; }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -333,50 +346,52 @@ def render_article_card(a: Dict, variant: str = "grid"):
     elif variant == "side":
         title_cls += " side-title"
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="{title_cls}">{a.get("title","(제목 없음)")}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="article-meta">{ts_to_str(a.get("published_at", 0))}</div>', unsafe_allow_html=True)
+    with st.container():  # <- 부모 컨테이너
+        # 부모에 카드 스타일이 적용되도록 마커만 출력
+        st.markdown('<div class="itr-card-marker"></div>', unsafe_allow_html=True)
 
-    summary = a.get("summary") or a.get("body_md") or ""
-    if summary:
-        st.markdown(f'<div class="article-summary">{summary}</div>', unsafe_allow_html=True)
+        # 이하 내용은 그대로
+        st.markdown(f'<div class="{title_cls}">{a.get("title","(제목 없음)")}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="article-meta">{ts_to_str(a.get("published_at", 0))}</div>', unsafe_allow_html=True)
 
-    bullets = a.get("bullets", [])
-    if bullets:
-        st.markdown('<div class="article-section-title">핵심 포인트</div>', unsafe_allow_html=True)
-        for b in bullets:
-            st.markdown(f"- {b}")
+        summary = a.get("summary") or a.get("body_md") or ""
+        if summary:
+            st.markdown(f'<div class="article-summary">{summary}</div>', unsafe_allow_html=True)
 
-    evidence = a.get("evidence_urls", [])
-    if evidence:
-        st.markdown('<div class="article-section-title">출처</div>', unsafe_allow_html=True)
-        for url in evidence:
-            st.write(f"- [{url}]({url})")
+        bullets = a.get("bullets", [])
+        if bullets:
+            st.markdown('<div class="article-section-title">핵심 포인트</div>', unsafe_allow_html=True)
+            for b in bullets:
+                st.markdown(f"- {b}")
 
-    # talks 준비(없으면 레거시→LLM 폴백)
-    talks = a.get("talks") or {}
-    missing = not any(talks.values() if isinstance(talks, dict) else [])
-    if missing:
-        has_legacy = any((a.get("insights") or {}).values()) or any((a.get("actions") or {}).values())
-        if has_legacy:
-            talks = build_talks_from_legacy(a)
-        else:
-            data = generate_talks(a.get("title", ""), summary)
-            talks = data.get("talks", {})
-        if a.get("__kind") in ("generated", "public"):
-            save_talks_to_doc(a["__kind"], a["id"], talks)
-        a["talks"] = talks
+        evidence = a.get("evidence_urls", [])
+        if evidence:
+            st.markdown('<div class="article-section-title">출처</div>', unsafe_allow_html=True)
+            for url in evidence:
+                st.write(f"- [{url}]({url})")
 
-    with st.expander("Itriggr는 이런 액션을 할 것 같아요", expanded=False):
-        for rt in ["general", "entrepreneur", "politician", "investor"]:
-            text = (talks or {}).get(rt, "").strip()
-            if not text:
-                continue
-            with st.chat_message("assistant"):
-                st.markdown(f"**{rt.capitalize()} 유형에게:**")
-                st.write(text)
+        # talks 렌더링 로직은 그대로
+        talks = a.get("talks") or {}
+        if not any(talks.values() if isinstance(talks, dict) else []):
+            has_legacy = any((a.get("insights") or {}).values()) or any((a.get("actions") or {}).values())
+            if has_legacy:
+                talks = build_talks_from_legacy(a)
+            else:
+                data = generate_talks(a.get("title",""), summary)
+                talks = data.get("talks", {})
+            if a.get("__kind") in ("generated", "public"):
+                save_talks_to_doc(a["__kind"], a["id"], talks)
+            a["talks"] = talks
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        with st.expander("Itriggr는 이런 액션을 할 것 같아요", expanded=False):
+            for rt in ["general", "entrepreneur", "politician", "investor"]:
+                text = (talks or {}).get(rt, "").strip()
+                if not text:
+                    continue
+                with st.chat_message("assistant"):
+                    st.markdown(f"**{rt.capitalize()} 유형에게:**")
+                    st.write(text)
+
 
 # ========================
 # 레이아웃 엔진 (히어로 + 사이드 + 3열 그리드 반복)
