@@ -10,7 +10,7 @@ from openai import OpenAI
 st.set_page_config(page_title="ITRiggr - News", page_icon="📰", layout="wide")
 
 # ========================
-# 글로벌 스타일 (여백 + 카드 + 타이포)
+# 글로벌 스타일 (여백 + 카드 + 타이포 + 컬럼 세퍼레이터)
 # ========================
 st.markdown("""
 <style>
@@ -21,7 +21,7 @@ st.markdown("""
   padding-right: 2.5rem;
 }
 
-/* 카드 공통 */
+/* 카드 공통 (참고: 실제 카드는 마커 기반으로 스타일링) */
 .card {
   border: 1px solid #eaeaea;
   border-radius: 14px;
@@ -62,8 +62,9 @@ st.markdown("""
   margin-bottom: 0.2rem;
 }
 
-/* 카드 마커를 가진 컨테이너를 카드처럼 보이게 */
+/* ── 카드: 마커가 박힌 컨테이너에 카드 스타일 적용 ── */
 div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) {
+  position: relative; /* 세퍼레이터 배치 기준 */
   border: 1px solid #eaeaea;
   border-radius: 14px;
   padding: 16px 18px;
@@ -74,22 +75,21 @@ div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) {
 /* 마커 자체는 보이지 않게 */
 .itr-card-marker { display: none; }
 
-/* ── Column separators: '마커'를 포함한 컨테이너 내부의 모든 컬럼에 적용 ── */
-div[data-testid="stVerticalBlock"]:has(.itr-row-start) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-  padding-left: 12px;
-  padding-right: 12px;
-}
-div[data-testid="stVerticalBlock"]:has(.itr-row-start) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:last-child) {
-  border-right: 1px solid rgba(0,0,0,0.08);
+/* 얇은 컬럼 세퍼레이터: 카드 내부 왼쪽에 수직 라인 */
+div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) > .itr-left-sep {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: -12px;              /* 칼럼 간격에 맞춰 조정 가능 */
+  width: 1px;
+  background: rgba(0,0,0,0.08);
 }
 
-/* 모바일에선 세퍼레이터 감춤 (원하면 제거) */
+/* 모바일에서는 세퍼레이터 숨김(선택사항) */
 @media (max-width: 900px) {
-  div[data-testid="stVerticalBlock"]:has(.itr-row-start) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:last-child) {
-    border-right: none;
+  div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) > .itr-left-sep {
+    display: none;
   }
 }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -353,20 +353,23 @@ def save_talks_to_doc(kind: str, doc_id: str, talks: Dict):
         st.warning(f"talks 저장 실패: {e}")
 
 # ========================
-# 기사 카드 렌더링
+# 기사 카드 렌더링 (세퍼레이터 on/off 지원)
 # ========================
-def render_article_card(a: Dict, variant: str = "grid"):
+def render_article_card(a: Dict, variant: str = "grid", left_sep: bool = False):
     title_cls = "article-title"
     if variant == "hero":
         title_cls += " hero-title"
     elif variant == "side":
         title_cls += " side-title"
 
-    with st.container():  # <- 부모 컨테이너
-        # 부모에 카드 스타일이 적용되도록 마커만 출력
+    with st.container():  # 카드 컨테이너
+        # 카드 스타일 적용 마커
         st.markdown('<div class="itr-card-marker"></div>', unsafe_allow_html=True)
+        # 필요 시 왼쪽 얇은 세퍼레이터 라인 삽입
+        if left_sep:
+            st.markdown('<div class="itr-left-sep"></div>', unsafe_allow_html=True)
 
-        # 이하 내용은 그대로
+        # 콘텐츠
         st.markdown(f'<div class="{title_cls}">{a.get("title","(제목 없음)")}</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="article-meta">{ts_to_str(a.get("published_at", 0))}</div>', unsafe_allow_html=True)
 
@@ -386,7 +389,7 @@ def render_article_card(a: Dict, variant: str = "grid"):
             for url in evidence:
                 st.write(f"- [{url}]({url})")
 
-        # talks 렌더링 로직은 그대로
+        # talks 준비(없으면 레거시→LLM 폴백)
         talks = a.get("talks") or {}
         if not any(talks.values() if isinstance(talks, dict) else []):
             has_legacy = any((a.get("insights") or {}).values()) or any((a.get("actions") or {}).values())
@@ -408,18 +411,14 @@ def render_article_card(a: Dict, variant: str = "grid"):
                     st.markdown(f"**{rt.capitalize()} 유형에게:**")
                     st.write(text)
 
-
 # ========================
 # 레이아웃 엔진 (히어로 + 사이드 + 3열 그리드 반복)
 # ========================
-HERO_ANCHOR = "one_plus_5k"  # 5의 배수번째 + 1번째 히어로
-
+# 1, 6, 11… 번째가 히어로(= 0,5,10… 인덱스)
 def compute_reserved_indices(n: int):
     """0-based 인덱스 sets: hero_set, side_set"""
-    # 1, 6, 11...번째가 히어로 → 0, 5, 10... 인덱스
-    hero_set = set(range(0, n, 5))
-    # 히어로 다음 글은 사이드
-    side_set = set(i + 1 for i in hero_set if i + 1 < n)
+    hero_set = set(range(0, n, 5))                 # 0, 5, 10, ...
+    side_set = set(i + 1 for i in hero_set if i + 1 < n)  # 히어로 직후는 사이드
     return hero_set, side_set
 
 def render_feed_with_layout(articles: List[Dict]):
@@ -431,21 +430,20 @@ def render_feed_with_layout(articles: List[Dict]):
     i = 0
     while i < n:
         if i in hero_set:
-            # ---- Hero + Side (중앙 컨테이너 안에서 8:4 비율) ----
+            # ---- Hero + Side 행 (8:4) ----
             outer = st.columns([1, 12, 1], gap="large")
             with outer[1]:
-                st.markdown('<div class="itr-row-start"></div>', unsafe_allow_html=True)
                 inner = st.columns([8, 4], gap="large")
                 with inner[0]:
-                    render_article_card(articles[i], variant="hero")
+                    render_article_card(articles[i], variant="hero", left_sep=False)  # 첫 칼럼: 선 없음
                 if i + 1 < n and (i + 1) in side_set:
                     with inner[1]:
-                        render_article_card(articles[i + 1], variant="side")
+                        render_article_card(articles[i + 1], variant="side", left_sep=True)  # 사이드: 선 표시
                     i += 2
                 else:
                     i += 1
 
-            # ---- 아래 3열 그리드(다음 히어로/사이드 예약 인덱스 전까지 채움) ----
+            # ---- 아래 3열 그리드 (가능하면 정확히 3개) ----
             slots = []
             j = i
             while j < n and len(slots) < 3:
@@ -454,11 +452,10 @@ def render_feed_with_layout(articles: List[Dict]):
                 slots.append(j)
                 j += 1
             if slots:
-                st.markdown('<div class="itr-row-start"></div>', unsafe_allow_html=True)
                 cols = st.columns(len(slots), gap="large")
-                for idx, col in zip(slots, cols):
+                for pos, (idx, col) in enumerate(zip(slots, cols)):
                     with col:
-                        render_article_card(articles[idx], variant="grid")
+                        render_article_card(articles[idx], variant="grid", left_sep=(pos > 0))  # 2,3번째만 선
                 i = j
             continue
 
@@ -471,11 +468,10 @@ def render_feed_with_layout(articles: List[Dict]):
             slots.append(j)
             j += 1
         if slots:
-            st.markdown('<div class="itr-row-start"></div>', unsafe_allow_html=True)
             cols = st.columns(len(slots), gap="large")
-            for idx, col in zip(slots, cols):
+            for pos, (idx, col) in enumerate(zip(slots, cols)):
                 with col:
-                    render_article_card(articles[idx], variant="grid")
+                    render_article_card(articles[idx], variant="grid", left_sep=(pos > 0))  # 2,3번째만 선
             i = j
         else:
             i += 1
