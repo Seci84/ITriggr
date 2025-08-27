@@ -41,6 +41,16 @@ st.markdown("""
   margin-top: 0.8rem;
   margin-bottom: 0.2rem;
 }
+
+/* 중앙 집중 레이아웃 */
+.block-container {
+  max-width: 800px;   /* 기사 영역 최대 폭 */
+  margin-left: auto;  /* 중앙 정렬 */
+  margin-right: auto;
+  padding-left: 1rem; /* 살짝의 좌우 여백 */
+  padding-right: 1rem;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
