@@ -74,18 +74,18 @@ div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) {
 /* 마커 자체는 보이지 않게 */
 .itr-card-marker { display: none; }
 
-/* ── Column separators: 마커 다음에 오는 가로 컬럼 블록에만 적용 ── */
-.itr-row-start + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+/* ── Column separators: '마커'를 포함한 컨테이너 내부의 모든 컬럼에 적용 ── */
+div[data-testid="stVerticalBlock"]:has(.itr-row-start) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
   padding-left: 12px;
   padding-right: 12px;
 }
-.itr-row-start + div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:last-child) {
-  border-right: 1px solid rgba(0,0,0,0.08); /* 얇은 선 */
+div[data-testid="stVerticalBlock"]:has(.itr-row-start) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:last-child) {
+  border-right: 1px solid rgba(0,0,0,0.08);
 }
 
-/* 모바일에선 세퍼레이터 감춤 (원하면 제거 가능) */
+/* 모바일에선 세퍼레이터 감춤 (원하면 제거) */
 @media (max-width: 900px) {
-  .itr-row-start + div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:last-child) {
+  div[data-testid="stVerticalBlock"]:has(.itr-row-start) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:last-child) {
     border-right: none;
   }
 }
