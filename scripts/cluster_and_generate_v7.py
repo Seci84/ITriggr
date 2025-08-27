@@ -35,18 +35,18 @@ else:
 PROMPT = """You are a news rewrite assistant. Return ONLY a single JSON object with no code fences, no explanations, and no comments.
 
 Required JSON shape (all fields are MANDATORY and must match exactly):
-{
+{{
   "title": "string",
   "summary": "string",
   "bullets": ["string", "string", "string"],
-  "facts": [{"text":"string","evidence_url":"string"}],
-  "talks": {
+  "facts": [{{"text":"string","evidence_url":"string"}}],
+  "talks": {{
     "general": "string",
     "entrepreneur": "string",
     "politician": "string",
     "investor": "string"
-  }
-}
+  }}
+}}
 
 Rules:
 - Strictly adhere to the exact JSON shape above. Any deviation (e.g., comments, code blocks, explanations) will result in rejection.
