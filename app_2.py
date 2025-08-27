@@ -10,17 +10,42 @@ from openai import OpenAI
 st.set_page_config(page_title="ITRiggr - News", page_icon="📰", layout="wide")
 
 # ========================
-# 글로벌 스타일 (저널 느낌 타이틀/본문)
+# 글로벌 스타일 (여백 + 카드 + 타이포)
 # ========================
 st.markdown("""
 <style>
+/* 전체 컨테이너 폭과 좌우 여백(독자 시선 중앙 집중) */
+.block-container {
+  max-width: 1200px;
+  padding-left: 2.5rem;
+  padding-right: 2.5rem;
+}
+
+/* 카드 공통 */
+.card {
+  border: 1px solid #eaeaea;
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+/* 저널 느낌 타이포 */
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Merriweather:wght@400;700&display=swap');
 
 .article-title {
   font-family: 'Playfair Display', serif;
-  font-size: 1.8rem;        /* 필요시 2.0rem 이상으로 키워도 됩니다 */
+  font-size: 1.8rem;
   line-height: 1.25;
   margin: 0.2rem 0 0.4rem 0;
+}
+
+.hero-title {
+  font-size: 2.2rem;
+}
+
+.side-title {
+  font-size: 1.6rem;
 }
 
 .article-meta {
@@ -114,9 +139,9 @@ def signout():
 # ========================
 @st.cache_data(show_spinner=False, ttl=60)
 def fetch_generated(limit: int = 30) -> List[Dict]:
-    """생성된 기사 우선(없으면 빈 리스트 반환)."""
+    """생성된 기사 우선(없으면 빈 리스트 반환). talks(신규) + 레거시(insights/actions) 함께 수집."""
     try:
-        q = (db.collection("generated_articles_v3")  # v3로 변경
+        q = (db.collection("generated_articles_v3")
              .order_by("created_at", direction=firestore.Query.DESCENDING)
              .limit(limit))
         out = []
@@ -130,6 +155,8 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "published_at": (x.get("published_window", {}) or {}).get("end", 0),
                 "model": x.get("model", "n/a"),
+                "talks": x.get("talks", {}),  # ✅ 신규 스키마
+                # 레거시 호환
                 "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
                 "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
                 "__kind": "generated",
@@ -141,11 +168,12 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
 
 @st.cache_data(show_spinner=False, ttl=60)
 def fetch_public(limit: int = 30) -> List[Dict]:
-    """퍼블릭 기사(수동/테스트용)"""
+    """퍼블릭 기사(수동/테스트용). talks(신규) + 레거시 함께 수집."""
     try:
         q = (db.collection("public_articles")
              .order_by("published_at", direction=firestore.Query.DESCENDING)
              .limit(limit))
+    ...
         out = []
         for d in q.stream():
             x = d.to_dict() or {}
@@ -156,6 +184,10 @@ def fetch_public(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "source": x.get("source", ""),
                 "published_at": x.get("published_at", 0),
+                "talks": x.get("talks", {}),  # ✅ 신규 스키마
+                # 레거시 호환
+                "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
+                "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
                 "__kind": "public",
             })
         return out
@@ -170,86 +202,227 @@ def ts_to_str(ts: int) -> str:
         return "-"
 
 # ========================
-# 액션 제안 (LLM 선택)
+# LLM(옵션): talks 생성 (폴백용)
 # ========================
-def generate_actions(title: str, content: str) -> Dict:
-    """OPENAI_API_KEY가 있으면 LLM, 없으면 템플릿."""
-    if OPENAI_API_KEY:
-        try:
-            client = OpenAI(api_key=OPENAI_API_KEY)
-            prompt = (
-                f"[기사 제목]\n{title}\n\n[내용(요약 허용)]\n{content[:1500]}\n\n"
-                "general, entrepreneur, politician, investor 각각에 대해 액션, 전제, 리스크, 대안을 간결 JSON으로:"
-                ' {"insights":{"general":"string", "entrepreneur":"string", "politician":"string", "investor":"string"},'
-                '  "actions":{"general":[{"action":"string","assumptions":"string","risk":"string","alternative":"string"}],'
-                '  "entrepreneur":[...], "politician":[...], "investor":[...]}}'
-                " 투자 자문 아님 톤, 과도한 확정 표현 금지."
-            )
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-            return json.loads(resp.choices[0].message.content)
-        except Exception as e:
-            st.warning(f"LLM 호출 실패(템플릿 사용): {e}")
+def _safe_json_loads(s: str) -> Dict:
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    import re
+    content2 = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", s.strip(), flags=re.I | re.M)
+    try:
+        return json.loads(content2)
+    except Exception:
+        pass
+    m = re.search(r"\\{.*\\}", s, flags=re.S)
+    if m:
+        return json.loads(m.group(0))
+    raise ValueError("JSON parse failed")
 
-    # 템플릿(LLM 미사용 시)
-    return {
-        "insights": {
-            "general": "Career opportunities: Astronautical Engineer roles at SpaceX",
-            "entrepreneur": "Patent companies: Quantum Technologies",
-            "politician": "Related laws: Space Policy Directives",
-            "investor": "Challenged companies: Boeing facing management issues"
-        },
-        "actions": {
-            "general": [{
-                "action": "Learn quantum computing via Coursera for roles like Astronautical Engineer at SpaceX",
-                "assumptions": "Tech advancement creates jobs",
-                "risk": "Skill obsolescence",
-                "alternative": "Join community forums"
-            }],
-            "entrepreneur": [{
-                "action": "Explore partnerships with Quantum Technologies for laser comm patents",
-                "assumptions": "Patent holders open for M&A",
-                "risk": "Access restrictions",
-                "alternative": "R&D investment"
-            }],
-            "politician": [{
-                "action": "Strengthen Space Policy Directives for quantum navigation",
-                "assumptions": "Gaps in international accords",
-                "risk": "International disputes",
-                "alternative": "Congressional hearings"
-            }],
-            "investor": [{
-                "action": "Invest in ARKX ETF for SpaceX exposure",
-                "assumptions": "Chained opportunities from Space Force missions",
-                "risk": "Management issues in ULA",
-                "alternative": "Diversified space funds"
-            }]
+def generate_talks(title: str, content: str) -> Dict:
+    if not OPENAI_API_KEY:
+        return {
+            "talks": {
+                "general": "이번 이슈는 우리 일상과도 닿아 있어요. 가볍게 의견을 나누되, 단정적 표현은 피하면 좋아요. 갈등을 키우기보다 로컬 이슈나 실질적 도움으로 시선을 돌려보면 좋겠어요.",
+                "entrepreneur": "시장 반응이 예민할 수 있으니 메시지는 차분하게, 고객 인터뷰와 작은 실험으로 가설부터 검증해요. 리스크는 작게, 학습은 빠르게 가져가 봅시다.",
+                "politician": "사실관계 확인과 균형 잡힌 메시지가 우선이에요. 지역 현안과 연결되는 대안부터 단계적으로 제시하면 불필요한 반발을 줄일 수 있어요.",
+                "investor": "헤드라인보다 펀더멘털과 현금흐름을 먼저 보세요. 변동성은 분산과 포지션 조절로 관리하고, 정보가 더 쌓일 때까지는 관망도 선택지예요."
+            }
         }
-    }
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        prompt = (
+            "역할: 뉴스를 읽고 독자 유형별로 행동/전제/리스크/대안을 자연스럽게 녹여 "
+            "‘대화체 한 문단(2~4문장, 한국어)’으로 말해주는 조언자.\n\n"
+            f"[기사 제목]\n{title}\n\n"
+            f"[내용(요약 허용, 1500자 내)]\n{content[:1500]}\n\n"
+            "JSON만 출력:\n"
+            "{ \"talks\": { \"general\": \"string\", \"entrepreneur\": \"string\", \"politician\": \"string\", \"investor\": \"string\" } }"
+        )
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            response_format={"type": "json_object"},
+        )
+        data = _safe_json_loads(resp.choices[0].message.content)
+        talks = data.get("talks", {})
+        for k in ["general", "entrepreneur", "politician", "investor"]:
+            talks.setdefault(k, "")
+        return {"talks": talks}
+    except Exception:
+        return {
+            "talks": {
+                "general": "이번 이슈는 우리 일상과도 닿아 있어요. 가볍게 의견을 나누되, 단정적 표현은 피하면 좋아요. 갈등을 키우기보다 로컬 이슈나 실질적 도움으로 시선을 돌려보면 좋겠어요.",
+                "entrepreneur": "시장 반응이 예민할 수 있으니 메시지는 차분하게, 고객 인터뷰와 작은 실험으로 가설부터 검증해요. 리스크는 작게, 학습은 빠르게 가져가 봅시다.",
+                "politician": "사실관계 확인과 균형 잡힌 메시지가 우선이에요. 지역 현안과 연결되는 대안부터 단계적으로 제시하면 불필요한 반발을 줄일 수 있어요.",
+                "investor": "헤드라인보다 펀더멘털과 현금흐름을 먼저 보세요. 변동성은 분산과 포지션 조절로 관리하고, 정보가 더 쌓일 때까지는 관망도 선택지예요."
+            }
+        }
 
 # ========================
-# 액션 UI: expander 적용
+# 레거시(insights/actions) → talks 합성(Fallback)
 # ========================
-def show_actions_ui(sel: Dict):
+def compose_talk_from_legacy(insight: str, item: Dict) -> str:
+    action = (item or {}).get("action", "").strip()
+    assumptions = (item or {}).get("assumptions", "").strip()
+    risk = (item or {}).get("risk", "").strip()
+    alt = (item or {}).get("alternative", "").strip()
+    parts = []
+    if insight: parts.append(f"{insight.strip()} ")
+    if action: parts.append(f"이번에는 '{action}'을(를) 가볍게 시도해보는 것도 좋아요. ")
+    if assumptions: parts.append(f"다만 이 제안은 '{assumptions}' 같은 전제 위에서 더 힘을 발휘해요. ")
+    if risk: parts.append(f"그리고 '{risk}' 부분은 미리 유의해 주세요. ")
+    if alt: parts.append(f"상황에 따라 '{alt}' 같은 우회로도 현실적인 대안이 될 수 있어요.")
+    text = "".join(parts).strip()
+    return text or "이 이슈는 단정짓기보다 상황을 넓게 살피는 편이 좋아요. 작게 시작해 보고, 위험 신호가 보이면 조정하는 접근을 권해요."
+
+def build_talks_from_legacy(a: Dict) -> Dict:
+    talks = {}
+    for rt in ["general", "entrepreneur", "politician", "investor"]:
+        insight = (a.get("insights") or {}).get(rt, "")
+        items = (a.get("actions") or {}).get(rt, [])
+        talks[rt] = compose_talk_from_legacy(insight, items[0] if items else {})
+    return talks
+
+def save_talks_to_doc(kind: str, doc_id: str, talks: Dict):
+    try:
+        if kind == "generated":
+            db.collection("generated_articles_v3").document(doc_id).set({"talks": talks}, merge=True)
+        elif kind == "public":
+            # 퍼블릭에도 저장하려면 주석 해제
+            # db.collection("public_articles").document(doc_id).set({"talks": talks}, merge=True)
+            pass
+    except Exception as e:
+        st.warning(f"talks 저장 실패: {e}")
+
+# ========================
+# 기사 카드 렌더링
+# ========================
+def render_article_card(a: Dict, variant: str = "grid"):
+    # 타이틀 클래스 변형
+    title_cls = "article-title"
+    if variant == "hero":
+        title_cls += " hero-title"
+    elif variant == "side":
+        title_cls += " side-title"
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown(f'<div class="{title_cls}">{a.get("title","(제목 없음)")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="article-meta">{ts_to_str(a.get("published_at", 0))}</div>', unsafe_allow_html=True)
+
+    summary = a.get("summary") or a.get("body_md") or ""
+    if summary:
+        st.markdown(f'<div class="article-summary">{summary}</div>', unsafe_allow_html=True)
+
+    bullets = a.get("bullets", [])
+    if bullets:
+        st.markdown('<div class="article-section-title">핵심 포인트</div>', unsafe_allow_html=True)
+        for b in bullets:
+            st.markdown(f"- {b}")
+
+    evidence = a.get("evidence_urls", [])
+    if evidence:
+        st.markdown('<div class="article-section-title">출처</div>', unsafe_allow_html=True)
+        for url in evidence:
+            st.write(f"- [{url}]({url})")
+
+    # talks 준비(없으면 레거시→LLM 폴백)
+    talks = a.get("talks") or {}
+    if not any(talks.values() if isinstance(talks, dict) else []):
+        has_legacy = any((a.get("insights") or {}).values()) or any((a.get("actions") or {}).values())
+        if has_legacy:
+            talks = build_talks_from_legacy(a)
+        else:
+            data = generate_talks(a.get("title",""), summary)
+            talks = data.get("talks", {})
+        if a.get("__kind") in ("generated", "public"):
+            save_talks_to_doc(a["__kind"], a["id"], talks)
+        a["talks"] = talks
+
     with st.expander("Itriggr는 이런 액션을 할 것 같아요", expanded=False):
-        actions = sel.get("actions", {})
-        insights = sel.get("insights", {})
-        reader_types = ["general", "entrepreneur", "politician", "investor"]
-
-        for reader_type in reader_types:
+        for rt in ["general", "entrepreneur", "politician", "investor"]:
+            text = (talks or {}).get(rt, "").strip()
+            if not text:
+                continue
             with st.chat_message("assistant"):
-                st.markdown(f"**{reader_type.capitalize()} 유형에게:**")
-                st.caption(insights.get(reader_type, "No insights available"))
-                for a in actions.get(reader_type, []):
-                    st.markdown(f"- **액션**: {a.get('action','')}")
-                    st.caption(
-                        f"전제: {a.get('assumptions','')} | "
-                        f"리스크: {a.get('risk','')} | "
-                        f"대안: {a.get('alternative','')}"
-                    )
+                st.markdown(f"**{rt.capitalize()} 유형에게:**")
+                st.write(text)
+
+    st.markdown('</div>', unsafe_allow_html=True)  # /card
+
+# ========================
+# 레이아웃 엔진 (히어로 + 사이드 + 3열 그리드 반복)
+# ========================
+HERO_ANCHOR = "one_plus_5k"  # "one_plus_5k" | "multiples_of_5"
+
+def compute_reserved_indices(n: int):
+    """0-based 인덱스 sets: hero_set, side_set"""
+    hero_set = set()
+    if HERO_ANCHOR == "one_plus_5k":
+        hero_set = set(range(0, n, 5))  # 0,5,10,... => 1,6,11...
+    elif HERO_ANCHOR == "multiples_of_5":
+        hero_set = set(i-1 for i in range(5, n+1, 5))  # 4,9,14,... => 5,10,15...
+        hero_set.add(0)  # 1번째도 히어로
+    # 사이드: 히어로 직후
+    side_set = set(i+1 for i in hero_set if i+1 < n)
+    return hero_set, side_set
+
+def render_feed_with_layout(articles: List[Dict]):
+    n = len(articles)
+    if n == 0:
+        return
+    hero_set, side_set = compute_reserved_indices(n)
+
+    i = 0
+    while i < n:
+        if i in hero_set:
+            # ---- Hero + Side (중앙 컨테이너 안에서 8:4 비율) ----
+            outer = st.columns([1, 12, 1], gap="large")
+            with outer[1]:
+                inner = st.columns([8, 4], gap="large")
+                with inner[0]:
+                    render_article_card(articles[i], variant="hero")
+                if i + 1 < n and (i + 1) in side_set:
+                    with inner[1]:
+                        render_article_card(articles[i + 1], variant="side")
+                    i += 2
+                else:
+                    i += 1
+            # ---- 그 다음에는 3열 그리드 (가능하면 정확히 3개, 모자라면 있는 만큼) ----
+            slots = []
+            j = i
+            while j < n and len(slots) < 3:
+                if (j in hero_set) or (j in side_set):
+                    break
+                slots.append(j)
+                j += 1
+            if slots:
+                cols = st.columns(len(slots), gap="large")
+                for idx, col in zip(slots, cols):
+                    with col:
+                        render_article_card(articles[idx], variant="grid")
+                i = j
+            continue
+
+        # ---- 일반 3열 그리드 패킹 ----
+        slots = []
+        j = i
+        while j < n and len(slots) < 3:
+            if (j in hero_set) or (j in side_set):
+                break
+            slots.append(j)
+            j += 1
+        if slots:
+            cols = st.columns(len(slots), gap="large")
+            for idx, col in zip(slots, cols):
+                with col:
+                    render_article_card(articles[idx], variant="grid")
+            i = j
+        else:
+            # 예약 인덱스면 스킵
+            i += 1
 
 # ========================
 # 사이드바: 가입/로그인 유지
@@ -314,7 +487,7 @@ with st.sidebar:
                     st.error(f"저장 실패: {e}")
 
 # ========================
-# 메인: 생성기사 우선 표시 (고정 섹션 표시)
+# 메인: 생성기사 우선 표시 (커스텀 레이아웃)
 # ========================
 st.title("📰 ITRiggr - 뉴스 피드")
 
@@ -329,37 +502,4 @@ else:
 if not articles:
     st.info("표시할 기사가 없습니다. 잠시 후 다시 시도하거나 파이프라인 실행을 확인해 주세요.")
 else:
-    st.subheader("기사 목록")
-    for a in articles:
-        # ---- 타이틀/메타 정보 (항상 표시) ----
-        st.markdown(f"<div class='article-title'>{a.get('title','(제목 없음)')}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='article-meta'>{ts_to_str(a.get('published_at', 0))}</div>", unsafe_allow_html=True)
-
-        # ---- 요약(또는 본문 대체) (항상 표시) ----
-        summary = a.get("summary") or a.get("body_md") or ""
-        if summary:
-            st.markdown(f"<div class='article-summary'>{summary}</div>", unsafe_allow_html=True)
-
-        # ---- 핵심 포인트 (항상 표시) ----
-        bullets = a.get("bullets", [])
-        if bullets:
-            st.markdown("<div class='article-section-title'>핵심 포인트</div>", unsafe_allow_html=True)
-            for b in bullets:
-                st.markdown(f"- {b}")
-
-        # ---- 출처 (항상 표시) ----
-        evidence = a.get("evidence_urls", [])
-        if evidence:
-            st.markdown("<div class='article-section-title'>출처</div>", unsafe_allow_html=True)
-            for url in evidence:
-                st.write(f"- [{url}]({url})")
-
-        # ---- 액션 제안 (없으면 동적 생성 후 expander로 표시) ----
-        if not a.get("insights") or not a.get("actions"):
-            actions_data = generate_actions(a.get("title",""), summary)
-            a["insights"] = actions_data.get("insights", a.get("insights", {}))
-            a["actions"] = actions_data.get("actions", a.get("actions", {}))
-
-        show_actions_ui(a)
-
-        st.divider()
+    render_feed_with_layout(articles)
