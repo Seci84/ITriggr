@@ -40,13 +40,8 @@ st.markdown("""
   margin: 0.2rem 0 0.4rem 0;
 }
 
-.hero-title {
-  font-size: 2.2rem;
-}
-
-.side-title {
-  font-size: 1.6rem;
-}
+.hero-title { font-size: 2.2rem; }
+.side-title { font-size: 1.6rem; }
 
 .article-meta {
   color: rgba(0,0,0,0.6);
@@ -155,7 +150,7 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "published_at": (x.get("published_window", {}) or {}).get("end", 0),
                 "model": x.get("model", "n/a"),
-                "talks": x.get("talks", {}),  # ✅ 신규 스키마
+                "talks": x.get("talks", {}),  # 신규 스키마
                 # 레거시 호환
                 "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
                 "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
@@ -173,8 +168,7 @@ def fetch_public(limit: int = 30) -> List[Dict]:
         q = (db.collection("public_articles")
              .order_by("published_at", direction=firestore.Query.DESCENDING)
              .limit(limit))
-    ...
-        out = []
+        out: List[Dict] = []
         for d in q.stream():
             x = d.to_dict() or {}
             out.append({
@@ -184,7 +178,7 @@ def fetch_public(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "source": x.get("source", ""),
                 "published_at": x.get("published_at", 0),
-                "talks": x.get("talks", {}),  # ✅ 신규 스키마
+                "talks": x.get("talks", {}),  # 신규 스키마
                 # 레거시 호환
                 "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
                 "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
@@ -210,17 +204,28 @@ def _safe_json_loads(s: str) -> Dict:
     except Exception:
         pass
     import re
-    content2 = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", s.strip(), flags=re.I | re.M)
+    content2 = re.sub(r"^```(?:json)?\s*|\s*```$", "", s.strip(), flags=re.I | re.M)
     try:
         return json.loads(content2)
     except Exception:
         pass
-    m = re.search(r"\\{.*\\}", s, flags=re.S)
+    m = re.search(r"\{.*\}", s, flags=re.S)
     if m:
         return json.loads(m.group(0))
     raise ValueError("JSON parse failed")
 
 def generate_talks(title: str, content: str) -> Dict:
+    """
+    talks 스키마:
+    {
+      "talks": {
+        "general": "2~4문장 한국어 대화체",
+        "entrepreneur": "...",
+        "politician": "...",
+        "investor": "..."
+      }
+    }
+    """
     if not OPENAI_API_KEY:
         return {
             "talks": {
@@ -233,12 +238,22 @@ def generate_talks(title: str, content: str) -> Dict:
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
         prompt = (
-            "역할: 뉴스를 읽고 독자 유형별로 행동/전제/리스크/대안을 자연스럽게 녹여 "
-            "‘대화체 한 문단(2~4문장, 한국어)’으로 말해주는 조언자.\n\n"
+            "역할: 당신은 뉴스를 읽고 독자 유형별로 행동/전제/리스크/대안을 자연스럽게 녹여 "
+            "‘대화체 한 문단(2~4문장, 한국어)’으로 말해주는 조언자입니다. "
+            "투자/정책 자문이 아닌 해석·참고용 톤을 유지하고, 과도한 확정 표현은 피하세요.\n\n"
             f"[기사 제목]\n{title}\n\n"
             f"[내용(요약 허용, 1500자 내)]\n{content[:1500]}\n\n"
-            "JSON만 출력:\n"
-            "{ \"talks\": { \"general\": \"string\", \"entrepreneur\": \"string\", \"politician\": \"string\", \"investor\": \"string\" } }"
+            "출력은 JSON 하나만, 스키마는 다음과 같습니다:\n"
+            "{\n"
+            '  "talks": {\n'
+            '    "general": "string",\n'
+            '    "entrepreneur": "string",\n'
+            '    "politician": "string",\n'
+            '    "investor": "string"\n'
+            "  }\n"
+            "}\n"
+            "각 문단에는 (행동 제안 + 전제/맥락 + 리스크 유의 + 현실적 대안)을 자연스럽게 포함하세요. "
+            "JSON 외의 텍스트(설명/코드블록/마크다운)는 절대 출력하지 마세요."
         )
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -251,7 +266,8 @@ def generate_talks(title: str, content: str) -> Dict:
         for k in ["general", "entrepreneur", "politician", "investor"]:
             talks.setdefault(k, "")
         return {"talks": talks}
-    except Exception:
+    except Exception as e:
+        st.warning(f"LLM 호출 실패(템플릿 사용): {e}")
         return {
             "talks": {
                 "general": "이번 이슈는 우리 일상과도 닿아 있어요. 가볍게 의견을 나누되, 단정적 표현은 피하면 좋아요. 갈등을 키우기보다 로컬 이슈나 실질적 도움으로 시선을 돌려보면 좋겠어요.",
@@ -269,29 +285,39 @@ def compose_talk_from_legacy(insight: str, item: Dict) -> str:
     assumptions = (item or {}).get("assumptions", "").strip()
     risk = (item or {}).get("risk", "").strip()
     alt = (item or {}).get("alternative", "").strip()
+
     parts = []
-    if insight: parts.append(f"{insight.strip()} ")
-    if action: parts.append(f"이번에는 '{action}'을(를) 가볍게 시도해보는 것도 좋아요. ")
-    if assumptions: parts.append(f"다만 이 제안은 '{assumptions}' 같은 전제 위에서 더 힘을 발휘해요. ")
-    if risk: parts.append(f"그리고 '{risk}' 부분은 미리 유의해 주세요. ")
-    if alt: parts.append(f"상황에 따라 '{alt}' 같은 우회로도 현실적인 대안이 될 수 있어요.")
+    if insight:
+        parts.append(f"{insight.strip()} ")
+    if action:
+        parts.append(f"이번에는 '{action}'을(를) 가볍게 시도해보는 것도 좋아요. ")
+    if assumptions:
+        parts.append(f"다만 이 제안은 '{assumptions}' 같은 전제 위에서 더 힘을 발휘해요. ")
+    if risk:
+        parts.append(f"그리고 '{risk}' 부분은 미리 유의해 주세요. ")
+    if alt:
+        parts.append(f"상황에 따라 '{alt}' 같은 우회로도 현실적인 대안이 될 수 있어요.")
     text = "".join(parts).strip()
-    return text or "이 이슈는 단정짓기보다 상황을 넓게 살피는 편이 좋아요. 작게 시작해 보고, 위험 신호가 보이면 조정하는 접근을 권해요."
+    if not text:
+        text = "이 이슈는 단정짓기보다 상황을 넓게 살피는 편이 좋아요. 작게 시작해 보고, 위험 신호가 보이면 조정하는 접근을 권해요."
+    return text
 
 def build_talks_from_legacy(a: Dict) -> Dict:
     talks = {}
-    for rt in ["general", "entrepreneur", "politician", "investor"]:
+    reader_types = ["general", "entrepreneur", "politician", "investor"]
+    for rt in reader_types:
         insight = (a.get("insights") or {}).get(rt, "")
         items = (a.get("actions") or {}).get(rt, [])
         talks[rt] = compose_talk_from_legacy(insight, items[0] if items else {})
     return talks
 
 def save_talks_to_doc(kind: str, doc_id: str, talks: Dict):
+    """talks를 문서에 병합 저장."""
     try:
         if kind == "generated":
             db.collection("generated_articles_v3").document(doc_id).set({"talks": talks}, merge=True)
         elif kind == "public":
-            # 퍼블릭에도 저장하려면 주석 해제
+            # 퍼블릭에도 저장하려면 주석 해제:
             # db.collection("public_articles").document(doc_id).set({"talks": talks}, merge=True)
             pass
     except Exception as e:
@@ -301,7 +327,6 @@ def save_talks_to_doc(kind: str, doc_id: str, talks: Dict):
 # 기사 카드 렌더링
 # ========================
 def render_article_card(a: Dict, variant: str = "grid"):
-    # 타이틀 클래스 변형
     title_cls = "article-title"
     if variant == "hero":
         title_cls += " hero-title"
@@ -330,12 +355,13 @@ def render_article_card(a: Dict, variant: str = "grid"):
 
     # talks 준비(없으면 레거시→LLM 폴백)
     talks = a.get("talks") or {}
-    if not any(talks.values() if isinstance(talks, dict) else []):
+    missing = not any(talks.values() if isinstance(talks, dict) else [])
+    if missing:
         has_legacy = any((a.get("insights") or {}).values()) or any((a.get("actions") or {}).values())
         if has_legacy:
             talks = build_talks_from_legacy(a)
         else:
-            data = generate_talks(a.get("title",""), summary)
+            data = generate_talks(a.get("title", ""), summary)
             talks = data.get("talks", {})
         if a.get("__kind") in ("generated", "public"):
             save_talks_to_doc(a["__kind"], a["id"], talks)
@@ -350,23 +376,19 @@ def render_article_card(a: Dict, variant: str = "grid"):
                 st.markdown(f"**{rt.capitalize()} 유형에게:**")
                 st.write(text)
 
-    st.markdown('</div>', unsafe_allow_html=True)  # /card
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ========================
 # 레이아웃 엔진 (히어로 + 사이드 + 3열 그리드 반복)
 # ========================
-HERO_ANCHOR = "one_plus_5k"  # "one_plus_5k" | "multiples_of_5"
+HERO_ANCHOR = "multiples_of_5"  # 5의 배수번째 + 1번째 히어로
 
 def compute_reserved_indices(n: int):
     """0-based 인덱스 sets: hero_set, side_set"""
-    hero_set = set()
-    if HERO_ANCHOR == "one_plus_5k":
-        hero_set = set(range(0, n, 5))  # 0,5,10,... => 1,6,11...
-    elif HERO_ANCHOR == "multiples_of_5":
-        hero_set = set(i-1 for i in range(5, n+1, 5))  # 4,9,14,... => 5,10,15...
-        hero_set.add(0)  # 1번째도 히어로
-    # 사이드: 히어로 직후
-    side_set = set(i+1 for i in hero_set if i+1 < n)
+    # 5의 배수번째(5,10,15,...) => 0-based로 4,9,14,... + 1번째(0)
+    hero_set = set(i - 1 for i in range(5, n + 1, 5))
+    hero_set.add(0)
+    side_set = set(i + 1 for i in hero_set if i + 1 < n)  # 히어로 다음은 사이드
     return hero_set, side_set
 
 def render_feed_with_layout(articles: List[Dict]):
@@ -390,7 +412,8 @@ def render_feed_with_layout(articles: List[Dict]):
                     i += 2
                 else:
                     i += 1
-            # ---- 그 다음에는 3열 그리드 (가능하면 정확히 3개, 모자라면 있는 만큼) ----
+
+            # ---- 아래 3열 그리드(다음 히어로/사이드 예약 인덱스 전까지 채움) ----
             slots = []
             j = i
             while j < n and len(slots) < 3:
@@ -421,7 +444,6 @@ def render_feed_with_layout(articles: List[Dict]):
                     render_article_card(articles[idx], variant="grid")
             i = j
         else:
-            # 예약 인덱스면 스킵
             i += 1
 
 # ========================
