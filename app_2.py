@@ -14,11 +14,20 @@ st.set_page_config(page_title="ITRiggr - News", page_icon="📰", layout="wide")
 # ========================
 st.markdown("""
 <style>
-/* 전체 컨테이너 폭과 좌우 여백 */
+/* 전체 컨테이너 폭과 좌우 여백(독자 시선 중앙 집중) */
 .block-container {
   max-width: 1200px;
   padding-left: 2.5rem;
   padding-right: 2.5rem;
+}
+
+/* 카드 공통 (참고: 실제 카드는 마커 기반으로 스타일링) */
+.card {
+  border: 1px solid #eaeaea;
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
 
 /* 저널 느낌 타이포 */
@@ -30,6 +39,7 @@ st.markdown("""
   line-height: 1.25;
   margin: 0.2rem 0 0.4rem 0;
 }
+
 .hero-title { font-size: 2.2rem; }
 .side-title { font-size: 1.6rem; }
 
@@ -38,21 +48,23 @@ st.markdown("""
   font-size: 0.9rem;
   margin-bottom: 0.6rem;
 }
+
 .article-summary {
   font-family: 'Merriweather', serif;
   font-size: 1.05rem;
   line-height: 1.65;
   margin-bottom: 0.6rem;
 }
+
 .article-section-title {
   font-weight: 700;
   margin-top: 0.8rem;
   margin-bottom: 0.2rem;
 }
 
-/* ── 카드: 마커 들어있는 컨테이너를 카드처럼 보이게 ── */
-div[data-testid="stVerticalBlock"]:has(.itr-card-marker) {
-  position: relative; /* 세퍼레이터 기준 */
+/* ── 카드: 마커가 박힌 컨테이너에 카드 스타일 적용 ── */
+div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) {
+  position: relative; /* 세퍼레이터 배치 기준 */
   border: 1px solid #eaeaea;
   border-radius: 14px;
   padding: 16px 18px;
@@ -60,32 +72,25 @@ div[data-testid="stVerticalBlock"]:has(.itr-card-marker) {
   box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
 
-/* 마커/플래그 자체는 안 보이게 */
-.itr-card-marker, .itr-sep-flag { display: none; }
+/* 마커 자체는 보이지 않게 */
+.itr-card-marker { display: none; }
 
-/* ── 세퍼레이터: 플래그가 있으면 왼쪽에 1px 라인 그리기 ──
-   (부모 카드의 border-left는 투명 처리해 중첩 느낌 방지) */
-div[data-testid="stVerticalBlock"]:has(.itr-card-marker):has(.itr-sep-flag) {
-  border-left-color: transparent;
-}
-div[data-testid="stVerticalBlock"]:has(.itr-card-marker):has(.itr-sep-flag)::before {
-  content: "";
+/* 얇은 컬럼 세퍼레이터: 카드 내부 왼쪽에 수직 라인 */
+div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) > .itr-left-sep {
   position: absolute;
   top: 0; bottom: 0;
-  left: 0;                 /* 카드의 왼쪽 경계선 자리 */
+  left: -12px;              /* 칼럼 간격에 맞춰 조정 가능 */
   width: 1px;
-  background: rgba(0,0,0,0.12);
+  background: rgba(0,0,0,0.08);
 }
 
-/* 모바일에서는 라인 감추고 싶다면 */
+/* 모바일에서는 세퍼레이터 숨김(선택사항) */
 @media (max-width: 900px) {
-  div[data-testid="stVerticalBlock"]:has(.itr-card-marker):has(.itr-sep-flag)::before {
+  div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) > .itr-left-sep {
     display: none;
   }
 }
 </style>
-
-
 """, unsafe_allow_html=True)
 
 # ========================
@@ -362,6 +367,7 @@ def render_article_card(a: Dict, variant: str = "grid", left_sep: bool = False):
         st.markdown('<div class="itr-card-marker"></div>', unsafe_allow_html=True)
         # 필요 시 왼쪽 얇은 세퍼레이터 라인 삽입
         if left_sep:
+            st.markdown('<div class="itr-left-sep"></div>', unsafe_allow_html=True)
 
         # 콘텐츠
         st.markdown(f'<div class="{title_cls}">{a.get("title","(제목 없음)")}</div>', unsafe_allow_html=True)
