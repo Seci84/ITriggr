@@ -381,14 +381,14 @@ def render_article_card(a: Dict, variant: str = "grid"):
 # ========================
 # 레이아웃 엔진 (히어로 + 사이드 + 3열 그리드 반복)
 # ========================
-HERO_ANCHOR = "multiples_of_5"  # 5의 배수번째 + 1번째 히어로
+HERO_ANCHOR = "one_plus_5k"  # 5의 배수번째 + 1번째 히어로
 
 def compute_reserved_indices(n: int):
     """0-based 인덱스 sets: hero_set, side_set"""
-    # 5의 배수번째(5,10,15,...) => 0-based로 4,9,14,... + 1번째(0)
-    hero_set = set(i - 1 for i in range(5, n + 1, 5))
-    hero_set.add(0)
-    side_set = set(i + 1 for i in hero_set if i + 1 < n)  # 히어로 다음은 사이드
+    # 1, 6, 11...번째가 히어로 → 0, 5, 10... 인덱스
+    hero_set = set(range(0, n, 5))
+    # 히어로 다음 글은 사이드
+    side_set = set(i + 1 for i in hero_set if i + 1 < n)
     return hero_set, side_set
 
 def render_feed_with_layout(articles: List[Dict]):
