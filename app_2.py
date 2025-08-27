@@ -362,7 +362,6 @@ def render_article_card(a: Dict, variant: str = "grid", left_sep: bool = False):
         st.markdown('<div class="itr-card-marker"></div>', unsafe_allow_html=True)
         # 필요 시 왼쪽 얇은 세퍼레이터 라인 삽입
         if left_sep:
-            st.markdown('<span class="itr-sep-flag"></span>', unsafe_allow_html=True)
 
         # 콘텐츠
         st.markdown(f'<div class="{title_cls}">{a.get("title","(제목 없음)")}</div>', unsafe_allow_html=True)
