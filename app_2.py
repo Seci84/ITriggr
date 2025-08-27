@@ -434,6 +434,7 @@ def render_feed_with_layout(articles: List[Dict]):
             # ---- Hero + Side (중앙 컨테이너 안에서 8:4 비율) ----
             outer = st.columns([1, 12, 1], gap="large")
             with outer[1]:
+                st.markdown('<div class="itr-row-start"></div>', unsafe_allow_html=True)
                 inner = st.columns([8, 4], gap="large")
                 with inner[0]:
                     render_article_card(articles[i], variant="hero")
