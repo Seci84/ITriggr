@@ -14,7 +14,7 @@ st.set_page_config(page_title="ITRiggr - News", page_icon="📰", layout="wide")
 # ========================
 st.markdown("""
 <style>
-/* 전체 컨테이너 폭과 좌우 여백(독자 시선 중앙 집중) */
+/* 전체 컨테이너 폭과 좌우 여백(중앙 집중) */
 .block-container {
   max-width: 1200px;
   padding-left: 2.5rem;
@@ -24,63 +24,61 @@ st.markdown("""
 /* 저널 느낌 타이포 */
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Merriweather:wght@400;700&display=swap');
 
+/* 타이틀: 위 여백 0으로 고정 → 같은 행 카드들 타이틀 시작선 정렬 */
 .article-title {
   font-family: 'Playfair Display', serif;
   font-size: 1.8rem;
   line-height: 1.25;
-  margin: 0 0 0.4rem 0;   /* ⬅️ 위쪽 0으로 고정 */
+  margin: 0 0 0.4rem 0; /* ⬅ 위쪽 0 */
 }
 .hero-title { font-size: 2.2rem; }
 .side-title { font-size: 1.6rem; }
 
+/* 메타/본문 */
 .article-meta {
   color: rgba(0,0,0,0.6);
   font-size: 0.9rem;
   margin-bottom: 0.6rem;
 }
-
 .article-summary {
   font-family: 'Merriweather', serif;
   font-size: 1.05rem;
   line-height: 1.65;
   margin-bottom: 0.6rem;
 }
-
 .article-section-title {
   font-weight: 700;
   margin-top: 0.8rem;
   margin-bottom: 0.2rem;
 }
 
-/* ── 카드: '마커'가 어디든 포함된 컨테이너에 카드 스타일 적용 ── */
+/* 카드 컨테이너: 선/테두리/그림자 모두 제거, 여백만 유지 */
 div[data-testid="stVerticalBlock"]:has(.itr-card-marker) {
   position: relative;
-  border: 1px solid #eaeaea;
-  border-radius: 14px;
-  padding: 16px 18px;
-  background: #ffffff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  border: none;          /* ⬅ 보더 제거 */
+  box-shadow: none;      /* ⬅ 그림자 제거 */
+  background: transparent;
+  padding: 16px 18px;    /* 카드 간 간격용 여백만 유지 */
 }
 
-/* 마커 자체는 보이지 않게 */
+/* 마커는 표시 안 함 */
 .itr-card-marker { display: none; }
 
-/* ① 카드 안에서 '타이틀이 들어 있는 stMarkdown 블록'의 상단 여백/패딩 제거 */
+/* 타이틀이 들어있는 첫 stMarkdown 블록의 상단 여백 제거(정렬 보정) */
 div[data-testid="stVerticalBlock"]:has(.itr-card-marker)
   div[data-testid="stMarkdown"]:has(.article-title) {
   margin-top: 0 !important;
   padding-top: 0 !important;
 }
 
-/* ② 혹시 첫 표시 요소가 타이틀이 아닐 때도 대비: 카드 첫 자식의 상단 여백 제거 */
+/* 혹시 첫 표시 요소가 타이틀이 아닐 때도 대비 */
 div[data-testid="stVerticalBlock"]:has(.itr-card-marker)
   > div[data-testid="stMarkdown"]:first-child {
   margin-top: 0 !important;
   padding-top: 0 !important;
 }
-
-/* 모바일 대응은 기본 스타일 유지 (추가 필요시 여기에) */
 </style>
+
 """, unsafe_allow_html=True)
 
 # ========================
