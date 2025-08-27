@@ -454,6 +454,7 @@ def render_feed_with_layout(articles: List[Dict]):
                 slots.append(j)
                 j += 1
             if slots:
+                st.markdown('<div class="itr-row-start"></div>', unsafe_allow_html=True)
                 cols = st.columns(len(slots), gap="large")
                 for idx, col in zip(slots, cols):
                     with col:
@@ -470,6 +471,7 @@ def render_feed_with_layout(articles: List[Dict]):
             slots.append(j)
             j += 1
         if slots:
+            st.markdown('<div class="itr-row-start"></div>', unsafe_allow_html=True)
             cols = st.columns(len(slots), gap="large")
             for idx, col in zip(slots, cols):
                 with col:
