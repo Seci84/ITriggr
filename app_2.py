@@ -10,7 +10,7 @@ from openai import OpenAI
 st.set_page_config(page_title="ITRiggr - News", page_icon="📰", layout="wide")
 
 # ========================
-# 글로벌 스타일 (여백 + 카드 + 타이포 + 컬럼 세퍼레이터)
+# 글로벌 스타일 (여백 + 카드 + 타이포 + 타이틀 정렬 보정)
 # ========================
 st.markdown("""
 <style>
@@ -21,15 +21,6 @@ st.markdown("""
   padding-right: 2.5rem;
 }
 
-/* 카드 공통 (참고: 실제 카드는 마커 기반으로 스타일링) */
-.card {
-  border: 1px solid #eaeaea;
-  border-radius: 14px;
-  padding: 16px 18px;
-  background: #ffffff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-}
-
 /* 저널 느낌 타이포 */
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Merriweather:wght@400;700&display=swap');
 
@@ -37,9 +28,8 @@ st.markdown("""
   font-family: 'Playfair Display', serif;
   font-size: 1.8rem;
   line-height: 1.25;
-  margin: 0.2rem 0 0.4rem 0;
+  margin: 0 0 0.4rem 0;   /* ⬅️ 위쪽 0으로 고정 */
 }
-
 .hero-title { font-size: 2.2rem; }
 .side-title { font-size: 1.6rem; }
 
@@ -62,9 +52,9 @@ st.markdown("""
   margin-bottom: 0.2rem;
 }
 
-/* ── 카드: 마커가 박힌 컨테이너에 카드 스타일 적용 ── */
-div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) {
-  position: relative; /* 세퍼레이터 배치 기준 */
+/* ── 카드: '마커'가 어디든 포함된 컨테이너에 카드 스타일 적용 ── */
+div[data-testid="stVerticalBlock"]:has(.itr-card-marker) {
+  position: relative;
   border: 1px solid #eaeaea;
   border-radius: 14px;
   padding: 16px 18px;
@@ -75,21 +65,21 @@ div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) {
 /* 마커 자체는 보이지 않게 */
 .itr-card-marker { display: none; }
 
-/* 얇은 컬럼 세퍼레이터: 카드 내부 왼쪽에 수직 라인 */
-div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) > .itr-left-sep {
-  position: absolute;
-  top: 0; bottom: 0;
-  left: -12px;              /* 칼럼 간격에 맞춰 조정 가능 */
-  width: 1px;
-  background: rgba(0,0,0,0.08);
+/* ① 카드 안에서 '타이틀이 들어 있는 stMarkdown 블록'의 상단 여백/패딩 제거 */
+div[data-testid="stVerticalBlock"]:has(.itr-card-marker)
+  div[data-testid="stMarkdown"]:has(.article-title) {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
 }
 
-/* 모바일에서는 세퍼레이터 숨김(선택사항) */
-@media (max-width: 900px) {
-  div[data-testid="stVerticalBlock"]:has(> .itr-card-marker) > .itr-left-sep {
-    display: none;
-  }
+/* ② 혹시 첫 표시 요소가 타이틀이 아닐 때도 대비: 카드 첫 자식의 상단 여백 제거 */
+div[data-testid="stVerticalBlock"]:has(.itr-card-marker)
+  > div[data-testid="stMarkdown"]:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
 }
+
+/* 모바일 대응은 기본 스타일 유지 (추가 필요시 여기에) */
 </style>
 """, unsafe_allow_html=True)
 
@@ -353,9 +343,9 @@ def save_talks_to_doc(kind: str, doc_id: str, talks: Dict):
         st.warning(f"talks 저장 실패: {e}")
 
 # ========================
-# 기사 카드 렌더링 (세퍼레이터 on/off 지원)
+# 기사 카드 렌더링 (타이틀 첫 블록로 렌더)
 # ========================
-def render_article_card(a: Dict, variant: str = "grid", left_sep: bool = False):
+def render_article_card(a: Dict, variant: str = "grid"):
     title_cls = "article-title"
     if variant == "hero":
         title_cls += " hero-title"
@@ -363,14 +353,13 @@ def render_article_card(a: Dict, variant: str = "grid", left_sep: bool = False):
         title_cls += " side-title"
 
     with st.container():  # 카드 컨테이너
-        # 카드 스타일 적용 마커
+        # 카드 스타일 적용 마커(보이지 않음)
         st.markdown('<div class="itr-card-marker"></div>', unsafe_allow_html=True)
-        # 필요 시 왼쪽 얇은 세퍼레이터 라인 삽입
-        if left_sep:
-            st.markdown('<div class="itr-left-sep"></div>', unsafe_allow_html=True)
+
+        # ✅ 타이틀을 가장 먼저 렌더링 (행 내 카드간 타이틀 시작 높이 정렬)
+        st.markdown(f'<div class="{title_cls}">{a.get("title","(제목 없음)")}</div>', unsafe_allow_html=True)
 
         # 콘텐츠
-        st.markdown(f'<div class="{title_cls}">{a.get("title","(제목 없음)")}</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="article-meta">{ts_to_str(a.get("published_at", 0))}</div>', unsafe_allow_html=True)
 
         summary = a.get("summary") or a.get("body_md") or ""
@@ -435,10 +424,10 @@ def render_feed_with_layout(articles: List[Dict]):
             with outer[1]:
                 inner = st.columns([8, 4], gap="large")
                 with inner[0]:
-                    render_article_card(articles[i], variant="hero", left_sep=False)  # 첫 칼럼: 선 없음
+                    render_article_card(articles[i], variant="hero")
                 if i + 1 < n and (i + 1) in side_set:
                     with inner[1]:
-                        render_article_card(articles[i + 1], variant="side", left_sep=True)  # 사이드: 선 표시
+                        render_article_card(articles[i + 1], variant="side")
                     i += 2
                 else:
                     i += 1
@@ -453,9 +442,9 @@ def render_feed_with_layout(articles: List[Dict]):
                 j += 1
             if slots:
                 cols = st.columns(len(slots), gap="large")
-                for pos, (idx, col) in enumerate(zip(slots, cols)):
+                for idx, col in zip(slots, cols):
                     with col:
-                        render_article_card(articles[idx], variant="grid", left_sep=(pos > 0))  # 2,3번째만 선
+                        render_article_card(articles[idx], variant="grid")
                 i = j
             continue
 
@@ -469,9 +458,9 @@ def render_feed_with_layout(articles: List[Dict]):
             j += 1
         if slots:
             cols = st.columns(len(slots), gap="large")
-            for pos, (idx, col) in enumerate(zip(slots, cols)):
+            for idx, col in zip(slots, cols):
                 with col:
-                    render_article_card(articles[idx], variant="grid", left_sep=(pos > 0))  # 2,3번째만 선
+                    render_article_card(articles[idx], variant="grid")
             i = j
         else:
             i += 1
