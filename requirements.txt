@@ -16,3 +16,7 @@ httpx==0.27.2
 
 # 신규 추가 (URL 본문 추출)
 beautifulsoup4>=4.12.2      # HTML 파싱
+
+# 신규 추가 (이미지 생성/처리)
+gradio_client>=0.15.0       # Hugging Face Spaces API 클라이언트
+pillow>=10.3.0              # 이미지 처리 (PIL)
