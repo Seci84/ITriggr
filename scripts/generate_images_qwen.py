@@ -27,6 +27,9 @@ from google.cloud.firestore_v1 import Transaction
 from PIL import Image
 from gradio_client import Client
 
+from google.cloud import exceptions as gcloud_exceptions
+
+
 
 # =========================
 # 환경변수
@@ -139,29 +142,42 @@ def upload_image_bytes_to_firebase(img_bytes: bytes, dest_path: str, content_typ
 # 중복 생성 방지: 트랜잭션 락
 # =========================
 
+from google.cloud import exceptions as gcloud_exceptions
+
 def article_lock_or_skip(db: firestore.Client, doc_ref: firestore.DocumentReference) -> bool:
-    tx = db.transaction()
-    try:
-        # ✅ 트랜잭션 객체를 doc_ref.get에 넘기는 방식(가장 호환성 좋음)
-        snap = doc_ref.get(transaction=tx)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _lock(tx: firestore.Transaction, ref: firestore.DocumentReference) -> bool:
+        snap = ref.get(transaction=tx)   # ✅ 트랜잭션-세이프하게 스냅샷 읽기
+        if not hasattr(snap, "to_dict"):
+            print(f"[LOCK-SKIP] unexpected snapshot type: {type(snap)}")
+            return False
+
         data = snap.to_dict() or {}
         images_map = data.get("images_map") or {}
         status = (data.get("image_status") or "").lower()
 
+        # 이미 작업 중/완료면 스킵
         if images_map.get("hero") or status in ("pending", "done"):
             return False
 
-        tx.update(doc_ref, {
+        # 선점 플래그 기록 (트랜잭션 안에서)
+        tx.update(ref, {
             "image_status": "pending",
             "image_lock_at": firestore.SERVER_TIMESTAMP
         })
         return True
-    finally:
-        # Firestore 파이썬 SDK는 tx.commit()를 명시 호출하지 않아도
-        # update 호출 시 내부적으로 처리되지만, 명시 커밋 원하면 아래 라인 사용
-        # tx.commit()
-        pass
 
+    try:
+        # ✅ 트랜잭션 함수 실행(커밋/재시도는 SDK가 처리)
+        return _lock(transaction, doc_ref)
+    except gcloud_exceptions.Aborted:
+        # 경쟁으로 트랜잭션이 중단되면 스킵 처리
+        return False
+    except Exception as e:
+        print(f"[LOCK-ERR] {doc_ref.id}: {e}")
+        return False
 
 
 # =========================
