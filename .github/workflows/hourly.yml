@@ -74,6 +74,22 @@ jobs:
           python scripts/cluster_and_generate_v7.py > cluster_generate.log 2>&1
         continue-on-error: true
 
+      - name: Generate images with Qwen
+        run: |
+          python scripts/generate_images_qwen.py > generate_images.log 2>&1
+        continue-on-error: true
+
+      - name: Upload logs for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs
+          path: |
+            fetch_news.log
+            cluster_generate.log
+            generate_images.log
+
+
       - name: Upload logs for debugging
         if: always()
         uses: actions/upload-artifact@v4
