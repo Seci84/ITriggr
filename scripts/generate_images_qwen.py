@@ -220,8 +220,14 @@ def run(limit: int = RUN_LIMIT):
            .order_by("created_at", direction=firestore.Query.DESCENDING)
            .limit(limit))
 
+    docs = q.get()   # ✅ stream() 대신 get()
+
     created = 0
-    for snap in q.stream():
+    for snap in docs:
+        if not hasattr(snap, "to_dict"):
+            print(f"[SKIP] unexpected type: {type(snap)}")
+            continue
+
         doc_id = snap.id
         a = snap.to_dict() or {}
         try:
@@ -235,6 +241,7 @@ def run(limit: int = RUN_LIMIT):
             print(f"[ERR] {doc_id}: {e}")
 
     print(f"Done. images_created={created}")
+
 
 
 if __name__ == "__main__":
