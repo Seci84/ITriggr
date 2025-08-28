@@ -83,7 +83,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-logs
+          name: pipeline-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             fetch_news.log
             cluster_generate.log
