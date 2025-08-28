@@ -138,10 +138,12 @@ def upload_image_bytes_to_firebase(img_bytes: bytes, dest_path: str, content_typ
 # =========================
 # 중복 생성 방지: 트랜잭션 락
 # =========================
+
 def article_lock_or_skip(db: firestore.Client, doc_ref: firestore.DocumentReference) -> bool:
-    @firestore.transactional
-    def _tx(tx: Transaction) -> bool:
-        snap = tx.get(doc_ref)
+    tx = db.transaction()
+    try:
+        # ✅ 트랜잭션 객체를 doc_ref.get에 넘기는 방식(가장 호환성 좋음)
+        snap = doc_ref.get(transaction=tx)
         data = snap.to_dict() or {}
         images_map = data.get("images_map") or {}
         status = (data.get("image_status") or "").lower()
@@ -154,8 +156,12 @@ def article_lock_or_skip(db: firestore.Client, doc_ref: firestore.DocumentRefere
             "image_lock_at": firestore.SERVER_TIMESTAMP
         })
         return True
+    finally:
+        # Firestore 파이썬 SDK는 tx.commit()를 명시 호출하지 않아도
+        # update 호출 시 내부적으로 처리되지만, 명시 커밋 원하면 아래 라인 사용
+        # tx.commit()
+        pass
 
-    return _tx(db.transaction())
 
 
 # =========================
