@@ -54,24 +54,23 @@ UPLOAD_HEIGHT = 540
 # =========================
 # Firebase 초기화 (경로 or JSON 문자열 지원, 버킷 자동 추출)
 # =========================
+
+FIREBASE_BUCKET_NAME = os.getenv("FIREBASE_STORAGE_BUCKET", "streamlit-test-d4ef0.firebasestorage.app")
+
 def init_firebase():
     if not firebase_admin._apps:
         if not FIREBASE_CREDENTIALS_JSON:
             raise RuntimeError("Set FIREBASE_CREDENTIALS_JSON (or FIREBASE_SERVICE_ACCOUNT)")
 
         cred = None
-        project_id = None
 
         if os.path.exists(FIREBASE_CREDENTIALS_JSON):
             # 파일 경로
             cred = credentials.Certificate(FIREBASE_CREDENTIALS_JSON)
-            with open(FIREBASE_CREDENTIALS_JSON, "r") as f:
-                project_id = json.load(f).get("project_id")
         else:
             # JSON 문자열
             try:
                 data = json.loads(FIREBASE_CREDENTIALS_JSON)
-                project_id = data.get("project_id")
                 tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
                 tmpfile.write(json.dumps(data).encode("utf-8"))
                 tmpfile.flush()
@@ -79,13 +78,11 @@ def init_firebase():
             except Exception as e:
                 raise RuntimeError("FIREBASE_CREDENTIALS_JSON is neither a valid path nor valid JSON") from e
 
-        if not project_id:
-            raise RuntimeError("Could not determine project_id from Firebase credentials")
+        # ✅ 명시적으로 버킷 이름 지정
+        firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_BUCKET_NAME})
 
-        default_bucket = f"{project_id}.appspot.com"
-        firebase_admin.initialize_app(cred, {"storageBucket": default_bucket})
+    return firestore.client(), storage.bucket(FIREBASE_BUCKET_NAME)
 
-    return firestore.client(), storage.bucket()
 
 
 # =========================
