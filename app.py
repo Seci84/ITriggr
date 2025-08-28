@@ -412,6 +412,16 @@ else:
         st.markdown(f"<div class='article-title'>{a.get('title','(제목 없음)')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='article-meta'>{ts_to_str(a.get('published_at', 0))}</div>", unsafe_allow_html=True)
 
+        # ---- 이미지(있으면 최상단에 표시) ----
+        hero_url = ((a.get("images_map") or {}).get("hero") or {}).get("url")
+        if not hero_url:
+            imgs = a.get("images") or []
+            if imgs:
+                hero_url = (imgs[0].get("url") if isinstance(imgs[0], dict) else imgs[0])
+        if hero_url:
+            st.image(hero_url, use_column_width=True)
+      
+
         # ---- 요약(또는 본문 대체) (항상 표시) ----
         summary = a.get("summary") or a.get("body_md") or ""
         if summary:
