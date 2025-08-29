@@ -434,7 +434,7 @@ else:
             hero_url = hero.get("url")
         
         if hero_url:
-            st.image(hero_url, use_column_width=True)
+            st.image(hero_url, use_container_width=True)
         
         # ---- 메타 정보 (이미지 아래) ----
         st.markdown(
