@@ -132,6 +132,7 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
         out = []
         for d in q.stream():
             x = d.to_dict() or {}
+
             out.append({
                 "id": d.id,
                 "title": x.get("title", "(제목 없음)"),
@@ -140,12 +141,16 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "published_at": (x.get("published_window", {}) or {}).get("end", 0),
                 "model": x.get("model", "n/a"),
-                "talks": x.get("talks", {}),  # ✅ 신규 스키마
+                "talks": x.get("talks", {}),
+                # 🔽 추가
+                "images_map": x.get("images_map", {}),
+                "images": x.get("images", []),  # 혹시 예전 형태도 폴백
                 # 레거시 호환
                 "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
                 "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
                 "__kind": "generated",
             })
+      
         return out
     except Exception as e:
         st.error(f"생성 기사 로드 실패: {e}")
@@ -161,6 +166,7 @@ def fetch_public(limit: int = 30) -> List[Dict]:
         out = []
         for d in q.stream():
             x = d.to_dict() or {}
+
             out.append({
                 "id": d.id,
                 "title": x.get("title", "(제목 없음)"),
@@ -168,12 +174,17 @@ def fetch_public(limit: int = 30) -> List[Dict]:
                 "evidence_urls": x.get("evidence_urls", []),
                 "source": x.get("source", ""),
                 "published_at": x.get("published_at", 0),
-                "talks": x.get("talks", {}),  # ✅ 신규 스키마
+                "talks": x.get("talks", {}),
+                # 🔽 추가
+                "images_map": x.get("images_map", {}),
+                "images": x.get("images", []),
                 # 레거시 호환
                 "insights": x.get("insights", {"general": "", "entrepreneur": "", "politician": "", "investor": ""}),
                 "actions": x.get("actions", {"general": [], "entrepreneur": [], "politician": [], "investor": []}),
                 "__kind": "public",
             })
+
+     
         return out
     except Exception as e:
         st.error(f"퍼블릭 기사 로드 실패: {e}")
