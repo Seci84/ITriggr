@@ -1,0 +1,40 @@
+name: generate-images-only
+
+on:
+  workflow_dispatch:   # 수동 실행 (원할 때 실행)
+  # schedule:
+    # - cron: "30 * * * *"   # 매시 30분에 실행 (UTC 기준, 필요 없으면 제거)
+
+jobs:
+  generate-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      FIREBASE_STORAGE_BUCKET: "streamlit-test-d4ef0.firebasestorage.app"
+      QWEN_SPACE: "Qwen/Qwen-Image"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install gradio_client pillow firebase-admin
+
+      - name: Run generate_images_qwen.py
+        run: |
+          python scripts/generate_images_qwen.py > generate_images.log 2>&1
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generate-images-logs-${{ github.run_id }}
+          path: generate_images.log
