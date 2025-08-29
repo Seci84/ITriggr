@@ -123,15 +123,26 @@ def qwen_generate_image(prompt: str) -> bytes:
 
 
 # =========================
-# Storage 업로드
+# Storage 업로드 (custom metadata 포함)
 # =========================
-def upload_image_bytes_to_firebase(img_bytes: bytes, dest_path: str, content_type: str = "image/webp") -> str:
+def upload_image_bytes_to_firebase(
+    img_bytes: bytes,
+    dest_path: str,
+    content_type: str = "image/webp",
+    extra_metadata: Optional[Dict[str, str]] = None,   # 👈 추가 메타데이터
+) -> str:
     bucket = storage.bucket()
     blob = bucket.blob(dest_path)
     token = str(uuid.uuid4())
 
     blob.upload_from_string(img_bytes, content_type=content_type)
-    blob.metadata = {"firebaseStorageDownloadTokens": token}
+
+    # 기본 토큰 + 사용자 정의 메타데이터 병합 (모두 문자열)
+    md = {"firebaseStorageDownloadTokens": token}
+    if extra_metadata:
+        md.update({k: str(v) for k, v in extra_metadata.items()})
+
+    blob.metadata = md
     blob.patch()
 
     quoted = dest_path.replace("/", "%2F")
@@ -186,19 +197,31 @@ def article_lock_or_skip(db: firestore.Client, doc_ref: firestore.DocumentRefere
 def ensure_image_for_article(doc_id: str, a: Dict[str, Any], db: firestore.Client) -> Optional[Dict[str, Any]]:
     doc_ref = db.collection("generated_articles_v3").document(doc_id)
 
+    # 빠른 스킵
     if (a.get("images_map") or {}).get("hero"):
         return None
     if not article_lock_or_skip(db, doc_ref):
         return None
 
     try:
+        # 1) 이미지 생성
         prompt = build_prompt_from_article(a, reader_type="general")
         img_bytes = qwen_generate_image(prompt)
 
+        # 2) 업로드 (문서ID 기반 경로 + 메타데이터에 article_id 포함)
         ts = int(time.time())
         dest = f"articles/{doc_id}/hero_{ts}.webp"
-        url = upload_image_bytes_to_firebase(img_bytes, dest)
+        url = upload_image_bytes_to_firebase(
+            img_bytes,
+            dest,
+            extra_metadata={
+                "article_id": doc_id,                       # ← 문서 ID
+                "collection": "generated_articles_v3",
+                "kind": "hero",
+            },
+        )
 
+        # 3) Firestore 기록 (문서 및 별도 컬렉션)
         hero_record = {
             "article_id": doc_id,
             "kind": "hero",
@@ -208,7 +231,10 @@ def ensure_image_for_article(doc_id: str, a: Dict[str, Any], db: firestore.Clien
                 "backend": "gradio_client",
                 "model": QWEN_SPACE,
                 "w": UPLOAD_WIDTH,
-                "h": UPLOAD_HEIGHT
+                "h": UPLOAD_HEIGHT,
+                "bucket": storage.bucket().name,
+                "path": dest,
+                "article_id": doc_id,
             },
             "created_at": firestore.SERVER_TIMESTAMP
         }
@@ -230,6 +256,7 @@ def ensure_image_for_article(doc_id: str, a: Dict[str, Any], db: firestore.Clien
             "image_failed_at": firestore.SERVER_TIMESTAMP
         }, merge=True)
         raise
+
 
 
 # =========================
