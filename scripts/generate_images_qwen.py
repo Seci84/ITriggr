@@ -269,7 +269,7 @@ def run(limit: int = RUN_LIMIT):
            .order_by("created_at", direction=firestore.Query.DESCENDING)
            .limit(limit))
 
-    docs = q.get()   # ✅ stream() 대신 get()
+    docs = q.get()
 
     created = 0
     for snap in docs:
@@ -279,18 +279,28 @@ def run(limit: int = RUN_LIMIT):
 
         doc_id = snap.id
         a = snap.to_dict() or {}
+        hero = ((a.get("images_map") or {}).get("hero") is not None)
+        status = (a.get("image_status") or "").lower()
+
+        # ✳️ 사전 이유 로그
+        if hero:
+            print(f"[SKIP-HAS-HERO] {doc_id}")
+            continue
+        if status in ("pending", "done"):
+            print(f"[SKIP-STATUS] {doc_id} status={status}")
+            continue
+
         try:
             rec = ensure_image_for_article(doc_id, a, db)
             if rec:
                 created += 1
                 print(f"[OK] {doc_id} → {rec['url']}")
             else:
-                print(f"[SKIP] {doc_id} (exists/locked/done)")
+                print(f"[SKIP-LOCK] {doc_id} (locked by another worker or just set)")
         except Exception as e:
             print(f"[ERR] {doc_id}: {e}")
 
     print(f"Done. images_created={created}")
-
 
 
 if __name__ == "__main__":
