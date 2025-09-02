@@ -1,8 +1,8 @@
 name: hourly-news-pipeline
 
 on:
-  schedule:
-    - cron: "0 * * * *"   # Run every hour at minute 0 (UTC)
+  # schedule:
+    # - cron: "0 * * * *"   # Run every hour at minute 0 (UTC)
   workflow_dispatch:
 
 jobs:
