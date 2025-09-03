@@ -1,1 +1,21 @@
 # 현재 앱이 어떤 버전 폴더를 쓸지 알려주는 표지판
+
+version_dir: "v2025-09-02"
+
+prompts:
+  - id: your-org/news-summary:2025-09-02
+    out: summary.yaml
+  - id: your-org/news-bullets:2025-09-02
+    out: bullets.yaml
+  - id: your-org/news-facts:2025-09-02
+    out: facts.yaml
+  - id: your-org/talks-general:2025-09-02
+    out: talks_general.yaml
+  - id: your-org/talks-entrepreneur:2025-09-02
+    out: talks_entrepreneur.yaml
+  - id: your-org/talks-politician:2025-09-02
+    out: talks_politician.yaml
+  - id: your-org/talks-investor:2025-09-02
+    out: talks_investor.yaml
+  - id: your-org/final-json:2025-09-02
+    out: schema/final_json.yaml
