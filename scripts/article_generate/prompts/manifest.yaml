@@ -3,6 +3,8 @@
 version_dir: "schema/v2025-09-02"
 
 prompts:
+  - id: Personal/news-title:2025-09-02
+    out: schema/v2025-09-02/title.yaml
   - id: Personal/news-summary:2025-09-02
     out: schema/v2025-09-02/summary.yaml
   - id: Personal/news-bullets:2025-09-02
