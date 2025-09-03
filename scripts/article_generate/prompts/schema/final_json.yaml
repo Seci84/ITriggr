@@ -1,0 +1,3 @@
+# 출력 JSON 모양(스키마) 정의
+# final_json.yaml에 “title/summary/bullets/facts/talks” 같은 필드 구조를 정의해 둠.
+# 앱이 어떤 형식으로 결과를 만들어야 하는지 참고용.
