@@ -16,10 +16,10 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
 # === LangChain / LangSmith Hub ===
-from langchain.prompts import load_prompt
+# from langchain.prompts import load_prompt
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
-from langchain import hub
+# from langchain import hub
 
 # --- OpenAI 사용 여부 ---
 client = None
