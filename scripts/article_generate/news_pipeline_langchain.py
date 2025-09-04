@@ -61,7 +61,7 @@ _str = StrOutputParser()
 _json = JsonOutputParser()
 
 def _hub(name: str):
-    return hub.pull(PROMPT_IDS[name]
+    return hub.pull(PROMPT_IDS[name])
 
 # --- 유틸 ---
 def safe_parse_json(content: str):
