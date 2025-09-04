@@ -1,3 +1,74 @@
 # 출력 JSON 모양(스키마) 정의
 # final_json.yaml에 “title/summary/bullets/facts/talks” 같은 필드 구조를 정의해 둠.
 # 앱이 어떤 형식으로 결과를 만들어야 하는지 참고용.
+
+id: your-org/final-json:2025-09-02
+description: >
+  Unified JSON schema for generated news articles.
+  This schema ensures that all prompts (summary, bullets, facts, talks) 
+  consolidate into one standard output for the app.
+
+input_variables:
+  - title
+  - summary
+  - bullets_json
+  - facts_json
+  - talk_general
+  - talk_entrepreneur
+  - talk_politician
+  - talk_investor
+
+output_schema:
+  type: object
+  required:
+    - title
+    - summary
+    - bullets
+    - facts
+    - talks
+  properties:
+    title:
+      type: string
+      description: Short news headline, max 15 words.
+    summary:
+      type: string
+      description: 3–5 sentence factual, cautious, neutral summary.
+    bullets:
+      type: array
+      items:
+        type: string
+      minItems: 3
+      maxItems: 3
+      description: Exactly three concise key points.
+    facts:
+      type: array
+      items:
+        type: object
+        required: [text, evidence_url]
+        properties:
+          text:
+            type: string
+            description: Verifiable fact derived from content.
+          evidence_url:
+            type: string
+            description: One source URL from the provided list.
+    talks:
+      type: object
+      required:
+        - general
+        - entrepreneur
+        - politician
+        - investor
+      properties:
+        general:
+          type: string
+          description: Conversational paragraph for general audience.
+        entrepreneur:
+          type: string
+          description: Conversational paragraph for entrepreneurs.
+        politician:
+          type: string
+          description: Conversational paragraph for politicians.
+        investor:
+          type: string
+          description: Conversational paragraph for investors.
