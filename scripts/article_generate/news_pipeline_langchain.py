@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 from langchain.prompts import load_prompt
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
+from langchain import hub
 
 # --- OpenAI 사용 여부 ---
 client = None
@@ -60,7 +61,7 @@ _str = StrOutputParser()
 _json = JsonOutputParser()
 
 def _hub(name: str):
-    return load_prompt(PROMPT_IDS[name])
+    return hub.pull(PROMPT_IDS[name]
 
 # --- 유틸 ---
 def safe_parse_json(content: str):
