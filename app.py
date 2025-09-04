@@ -126,7 +126,7 @@ def signout():
 def fetch_generated(limit: int = 30) -> List[Dict]:
     """생성된 기사 우선(없으면 빈 리스트 반환). talks(신규) + 레거시(insights/actions) 함께 수집."""
     try:
-        q = (db.collection("generated_articles_v3")
+        q = (db.collection("generated_articles_v4")
              .order_by("created_at", direction=firestore.Query.DESCENDING)
              .limit(limit))
         out = []
@@ -410,7 +410,7 @@ gen = fetch_generated(limit=30)
 articles = gen if gen else fetch_public(limit=30)
 
 if gen:
-    st.success("데이터 소스: generated_articles_v3")
+    st.success("데이터 소스: generated_articles_v4")
 else:
     st.warning("데이터 소스: public_articles (생성 기사가 아직 없거나 필터에 걸리지 않음)")
 
