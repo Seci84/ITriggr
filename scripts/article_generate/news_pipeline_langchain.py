@@ -45,15 +45,15 @@ if os.getenv("LANGSMITH_API_KEY"):
 
 # === LangSmith Prompt IDs ===
 PROMPT_IDS = {
-    "title":             "Personal/news-title:2025-09-04",
-    "summary":           "Personal/news-summary:2025-09-04",
-    "bullets":           "Personal/news-bullets:2025-09-04",
-    "facts":             "Personal/news-facts:2025-09-04",
-    "talks_general":     "Personal/news-talks-general:2025-09-04",
-    "talks_entrepreneur":"Personal/news-talks-entrepreneur:2025-09-04",
-    "talks_politician":  "Personal/news-talks-politician:2025-09-04",
-    "talks_investor":    "Personal/news-talks-investor:2025-09-04",
-    "final":             "Personal/final-json:2025-09-04",
+    "title":             "news-title:2025-09-04",
+    "summary":           "news-summary:2025-09-04",
+    "bullets":           "news-bullets:2025-09-04",
+    "facts":             "news-facts:2025-09-04",
+    "talks_general":     "news-talks-general:2025-09-04",
+    "talks_entrepreneur":"news-talks-entrepreneur:2025-09-04",
+    "talks_politician":  "news-talks-politician:2025-09-04",
+    "talks_investor":    "news-talks-investor:2025-09-04",
+    "final":             "final-json:2025-09-04",
 }
 
 _llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2) if (USE_OPENAI and OPENAI_API_KEY) else None
