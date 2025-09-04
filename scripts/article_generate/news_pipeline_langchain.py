@@ -1,6 +1,6 @@
 # 실제 뉴스 가져와 요약하고 Firestore에 저장하는 메인 로직.
-# 프롬프트를 직접 하드코딩하지 않음
-# langsmith에서 프롬프트 불러오기 → 모델 실행 → firebase로 저장
+# 프롬프트 하드코딩 X
+# LangSmith에서 프롬프트 불러오기 → 모델 실행 → Firestore 저장
 
 import os
 import re
@@ -8,27 +8,28 @@ import json
 import time
 import traceback
 from collections import defaultdict
-from firebase_admin import firestore
-from common import init_db, log_event, sim_prefix
-from google.cloud.firestore_v1.base_query import FieldFilter
-import requests
-from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
-# === LangChain / LangSmith Hub ===
-# from langchain.prompts import load_prompt
+import requests
+from bs4 import BeautifulSoup
+from firebase_admin import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
+
+from common import init_db, log_event, sim_prefix
+
+# === LangChain / LangSmith ===
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
-# from langchain import hub
+from langsmith import Client  # ← LangSmith SDK만 사용 (hub.deprecated 제거)
 
 # --- OpenAI 사용 여부 ---
-client = None
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
 
+_llm = None
 if OPENAI_API_KEY and USE_OPENAI:
     try:
-        client = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+        _llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
         print("✅ OpenAI client initialized successfully")
     except Exception as e:
         print(f"❌ OpenAI client init failed: {e}")
@@ -37,31 +38,38 @@ if OPENAI_API_KEY and USE_OPENAI:
 else:
     print(f"USE_OPENAI = {USE_OPENAI}, OPENAI_API_KEY is {'set' if OPENAI_API_KEY else 'not set'}")
 
-# === LangSmith tracing (옵션) ===
+# === LangSmith tracing(옵션) ===
 if os.getenv("LANGSMITH_API_KEY"):
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
     os.environ.setdefault("LANGCHAIN_PROJECT", os.getenv("LANGSMITH_PROJECT", "news-pipeline"))
 
-# === LangSmith Prompt IDs ===
+# === LangSmith Prompt IDs (Personal 워크스페이스: owner 생략) ===
 PROMPT_IDS = {
-    "title":             "news-title:2025-09-04",
-    "summary":           "news-summary:2025-09-04",
-    "bullets":           "news-bullets:2025-09-04",
-    "facts":             "news-facts:2025-09-04",
-    "talks_general":     "news-talks-general:2025-09-04",
-    "talks_entrepreneur":"news-talks-entrepreneur:2025-09-04",
-    "talks_politician":  "news-talks-politician:2025-09-04",
-    "talks_investor":    "news-talks-investor:2025-09-04",
-    "final":             "final-json:2025-09-04",
+    "title":              "news-title:2025-09-04",
+    "summary":            "news-summary:2025-09-04",
+    "bullets":            "news-bullets:2025-09-04",
+    "facts":              "news-facts:2025-09-04",
+    "talks_general":      "news-talks-general:2025-09-04",
+    "talks_entrepreneur": "news-talks-entrepreneur:2025-09-04",
+    "talks_politician":   "news-talks-politician:2025-09-04",
+    "talks_investor":     "news-talks-investor:2025-09-04",
+    "final":              "final-json:2025-09-04",
 }
 
-_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2) if (USE_OPENAI and OPENAI_API_KEY) else None
+_ls = Client()
 _str = StrOutputParser()
 _json = JsonOutputParser()
 
 def _hub(name: str):
-    return hub.pull(PROMPT_IDS[name])
+    """LangSmith에서 프롬프트를 끌어오되, 태그 못 찾으면 :latest로 폴백"""
+    pid = PROMPT_IDS[name]
+    try:
+        return _ls.pull_prompt(pid)  # e.g., "news-summary:2025-09-04"
+    except Exception:
+        base = pid.split(":", 1)[0]
+        print(f"[Hub] Falling back to latest for {base}")
+        return _ls.pull_prompt(f"{base}:latest")
 
 # --- 유틸 ---
 def safe_parse_json(content: str):
@@ -132,7 +140,7 @@ def already_generated(db, cluster_key: str) -> bool:
         return False
 
 def make_payload_from_sources(items):
-    """Fallback payload"""
+    """Fallback payload (LLM 비활성/오류 시)"""
     n = len(items)
     title = f"[Auto] {n} source{'s' if n > 1 else ''}"
     summary = "Template summary (LLM disabled)"
@@ -144,25 +152,37 @@ def make_payload_from_sources(items):
 
 # === LangSmith 프롬프트 실행 ===
 def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
+    """본문 전체(input_text)만 각 프롬프트의 입력으로 사용.
+       facts만 추가로 sources(증거 URL 목록) 전달."""
     if not _llm:
         return None
     try:
         # summary
-        summary = (_llm | _str).invoke(_hub("summary").format(input=input_text))
+        summary = (_llm | _str).invoke(_hub("summary").format(input=input_text)).strip()
+
         # bullets
-        bullets_raw = (_llm | _str).invoke(_hub("bullets").format(input=input_text))
-        bullets = [l.strip("•- \t") for l in bullets_raw.splitlines() if l.strip()][:3]
-        while len(bullets) < 3: bullets.append("Additional key point")
+        bullets_raw = (_llm | _str).invoke(_hub("bullets").format(input=input_text)).strip()
+        bullets = [l.strip("•- \t") for l in bullets_raw.splitlines() if l.strip()]
+        while len(bullets) < 3:
+            bullets.append("Additional key point")
+        bullets = bullets[:3]
+
         # title
-        title = (_llm | _str).invoke(_hub("title").format(input=input_text))
-        # facts
-        facts = (_llm | _json).invoke(_hub("facts").format(input=input_text, sources="\n".join(sources)))
-        # talks
-        tg = (_llm | _str).invoke(_hub("talks_general").format(summary=summary, bullets="\n".join(bullets)))
-        te = (_llm | _str).invoke(_hub("talks_entrepreneur").format(summary=summary, bullets="\n".join(bullets)))
-        tp = (_llm | _str).invoke(_hub("talks_politician").format(summary=summary, bullets="\n".join(bullets)))
-        ti = (_llm | _str).invoke(_hub("talks_investor").format(summary=summary, bullets="\n".join(bullets)))
-        # 최종 JSON
+        title = (_llm | _str).invoke(_hub("title").format(input=input_text)).strip()
+
+        # facts (JSON)
+        facts = (_llm | _json).invoke(
+            _hub("facts").format(input=input_text, sources="\n".join(sources))
+        )
+
+        # talks (각 프롬프트는 summary, bullets만 입력받도록 설계)
+        bullets_block = "\n".join(f"- {b}" for b in bullets)
+        tg = (_llm | _str).invoke(_hub("talks_general").format(summary=summary, bullets=bullets_block)).strip()
+        te = (_llm | _str).invoke(_hub("talks_entrepreneur").format(summary=summary, bullets=bullets_block)).strip()
+        tp = (_llm | _str).invoke(_hub("talks_politician").format(summary=summary, bullets=bullets_block)).strip()
+        ti = (_llm | _str).invoke(_hub("talks_investor").format(summary=summary, bullets=bullets_block)).strip()
+
+        # 최종 JSON 조립 (final-json 프롬프트에 조각 전달)
         final_payload = (_llm | _json).invoke(
             _hub("final").format(
                 title=title,
@@ -211,7 +231,7 @@ def run_once():
                 payload = build_with_hub_prompts(input_text, evidence_urls)
                 latency_ms = int((time.time()-t0)*1000)
                 if payload:
-                    model_used = "hub:gpt-4o-mini"
+                    model_used = "langsmith:gpt-4o-mini"
                 else:
                     payload = make_payload_from_sources(items)
             except Exception as e:
@@ -234,16 +254,16 @@ def run_once():
             "raw_refs": [x[0] for x in items],
             "published_window": {"start": ts_min, "end": ts_max},
             "model": model_used,
-            "token_usage": {},
+            "token_usage": {},              # LangSmith에서 usage 추적
             "latency_ms": latency_ms,
-            "schema_version": "talks_v1",
+            "schema_version": "talks_v1",   # 저장 구조 변경 없음
             "created_at": firestore.SERVER_TIMESTAMP,
         }
         db.collection("generated_articles_v4").add(doc)
         created += 1
         print(f"[OK] Generated {cluster_key}, total={created}")
 
-    log_event(db, "generate_done", {"created": created})
+    log_event(db, "generate_done_v4", {"created": created})
     print(f"Done. groups={len(groups)}, created={created}")
 
 if __name__ == "__main__":
