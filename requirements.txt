@@ -26,7 +26,7 @@ langchain==0.2.11
 langchain-core>=0.2.0
 langchain-openai>=0.1.0
 langsmith>=0.1.0
-langchainhub>=0.1.14 
+# langchainhub>=0.1.14 
 
 # --- YAML config ---
 PyYAML>=6.0
