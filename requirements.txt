@@ -22,6 +22,7 @@ gradio_client>=0.15.0       # Hugging Face Spaces API 클라이언트
 pillow>=10.3.0              # 이미지 처리 (PIL)
 
 # --- LangChain & OpenAI stack ---
+langchain==0.2.11
 langchain-core>=0.2.0
 langchain-openai>=0.1.0
 langsmith>=0.1.0
