@@ -1,4 +1,4 @@
-name: hourly-news-pipeline
+name: hourly-news-pipeline-langchain
 
 on:
   # schedule:
@@ -13,6 +13,7 @@ jobs:
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
       RSS_SOURCES: ${{ secrets.RSS_SOURCES }}
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       USE_OPENAI: "True"  # Enable LLM summarization
       HTTP_PROXY: ""
@@ -66,17 +67,17 @@ jobs:
 
       - name: Fetch news articles
         run: |
-          python scripts/fetch_news.py > fetch_news.log 2>&1
+          python scripts/article_generate/fetch_news.py > fetch_news.log 2>&1
         continue-on-error: true
 
       - name: Cluster and generate articles
         run: |
-          python scripts/cluster_and_generate_v7.py > cluster_generate.log 2>&1
+          python scripts/article_generate/news_pipeline_langchain.py > cluster_generate.log 2>&1
         continue-on-error: true
 
       - name: Generate images with Qwen
         run: |
-          python scripts/generate_images_qwen.py > generate_images.log 2>&1
+          python scripts/image_generate/generate_images_qwen.py > generate_images.log 2>&1
         continue-on-error: true
 
       - name: Upload logs for debugging
