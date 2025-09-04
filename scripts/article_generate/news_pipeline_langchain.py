@@ -122,7 +122,7 @@ def load_recent_raw_groups(db, window_sec=6*60*60, prefix_bits=16,
 
 def already_generated(db, cluster_key: str) -> bool:
     try:
-        snap = (db.collection("generated_articles_v3")
+        snap = (db.collection("generated_articles_v4")
                   .where(filter=FieldFilter("cluster_key", "==", cluster_key))
                   .limit(1).get())
         return len(snap) > 0
@@ -238,7 +238,7 @@ def run_once():
             "schema_version": "talks_v1",
             "created_at": firestore.SERVER_TIMESTAMP,
         }
-        db.collection("generated_articles_v3").add(doc)
+        db.collection("generated_articles_v4").add(doc)
         created += 1
         print(f"[OK] Generated {cluster_key}, total={created}")
 
