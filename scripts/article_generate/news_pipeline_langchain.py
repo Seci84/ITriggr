@@ -50,11 +50,10 @@ PROMPT_IDS = {
     "summary":            "news-summary:2025-09-04",
     "bullets":            "news-bullets:2025-09-04",
     "facts":              "news-facts:2025-09-04",
-    "talks_general":      "news-talks-general:2025-09-04",
-    "talks_entrepreneur": "news-talks-entrepreneur:2025-09-04",
-    "talks_politician":   "news-talks-politician:2025-09-04",
-    "talks_investor":     "news-talks-investor:2025-09-04",
-    "final":              "final-json:2025-09-04",
+    "talks_general":      "talks-general:2025-09-04",
+    "talks_entrepreneur": "talks-entrepreneur:2025-09-04",
+    "talks_politician":   "talks-politician:2025-09-04",
+    "talks_investor":     "talks-investor:2025-09-04",
 }
 
 _ls = Client()
