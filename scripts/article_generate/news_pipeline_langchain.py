@@ -180,6 +180,38 @@ TALKS:
 - investor: {talk_investor}
 """
 
+# === 프롬프트 포맷팅 유틸 (변수명 자동 매핑) ===
+def _format_prompt(p, **vals):
+    """
+    LangSmith Prompt가 요구하는 input_variables가 'text'/'content' 등일 때
+    코드에서 전달한 'input'을 자동으로 매핑해줌. 누락 변수는 빈 문자열로 채움.
+    """
+    # 1) input 별칭 자동 복사
+    if "input" in vals:
+        for alias in ("text", "content", "article", "body", "document", "docs"):
+            vals.setdefault(alias, vals["input"])
+    # 2) sources 별칭도 약하게 보완
+    if "sources" in vals:
+        vals.setdefault("evidence_urls", vals["sources"])
+        vals.setdefault("urls", vals["sources"])
+
+    # 3) 누락 변수 자동 채움
+    input_vars = []
+    try:
+        input_vars = list(getattr(p, "input_variables", []) or [])
+    except Exception:
+        pass
+    for v in input_vars:
+        vals.setdefault(v, "")
+
+    try:
+        return p.format(**vals)
+    except KeyError as e:
+        # 마지막 방어: 남은 누락 키를 공백으로 채워 재시도
+        missing = str(e).strip("'")
+        vals[missing] = ""
+        return p.format(**vals)
+
 # === LangSmith 프롬프트 실행 ===
 def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
     """본문 전체(input_text)만 각 프롬프트의 입력으로 사용.
@@ -188,29 +220,29 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         return None
     try:
         # summary
-        summary = (_llm | _str).invoke(_hub("summary").format(input=input_text)).strip()
+        summary = (_llm | _str).invoke(_format_prompt(_hub("summary"), input=input_text)).strip()
 
         # bullets
-        bullets_raw = (_llm | _str).invoke(_hub("bullets").format(input=input_text)).strip()
+        bullets_raw = (_llm | _str).invoke(_format_prompt(_hub("bullets"), input=input_text)).strip()
         bullets = [l.strip("•- \t") for l in bullets_raw.splitlines() if l.strip()]
         while len(bullets) < 3:
             bullets.append("Additional key point")
         bullets = bullets[:3]
 
         # title
-        title = (_llm | _str).invoke(_hub("title").format(input=input_text)).strip()
+        title = (_llm | _str).invoke(_format_prompt(_hub("title"), input=input_text)).strip()
 
         # facts (JSON)
         facts = (_llm | _json).invoke(
-            _hub("facts").format(input=input_text, sources="\n".join(sources))
+            _format_prompt(_hub("facts"), input=input_text, sources="\n".join(sources))
         )
 
         # talks (각 프롬프트는 summary, bullets만 입력받도록 설계)
         bullets_block = "\n".join(f"- {b}" for b in bullets)
-        tg = (_llm | _str).invoke(_hub("talks_general").format(summary=summary, bullets=bullets_block)).strip()
-        te = (_llm | _str).invoke(_hub("talks_entrepreneur").format(summary=summary, bullets=bullets_block)).strip()
-        tp = (_llm | _str).invoke(_hub("talks_politician").format(summary=summary, bullets=bullets_block)).strip()
-        ti = (_llm | _str).invoke(_hub("talks_investor").format(summary=summary, bullets=bullets_block)).strip()
+        tg = (_llm | _str).invoke(_format_prompt(_hub("talks_general"), summary=summary, bullets=bullets_block)).strip()
+        te = (_llm | _str).invoke(_format_prompt(_hub("talks_entrepreneur"), summary=summary, bullets=bullets_block)).strip()
+        tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), summary=summary, bullets=bullets_block)).strip()
+        ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), summary=summary, bullets=bullets_block)).strip()
 
         # 최종 JSON 조립 (final은 하드코딩 템플릿 사용)
         final_payload = (_llm | _json).invoke(
