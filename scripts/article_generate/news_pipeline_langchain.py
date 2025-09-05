@@ -149,6 +149,37 @@ def make_payload_from_sources(items):
     talks = {"general":"", "entrepreneur":"", "politician":"", "investor":""}
     return {"title":title, "summary":summary, "bullets":bullets, "facts":facts, "talks":talks}
 
+# === final 하드코딩 프롬프트 ===
+FINAL_PROMPT = """You are a strict JSON assembler.
+Return only a strict minified JSON object with keys: title, summary, bullets, facts, talks.
+- title: string
+- summary: string
+- bullets: array of exactly 3 short strings
+- facts: array of objects: {"text": string, "evidence_url": string}
+- talks: object with keys {"general","entrepreneur","politician","investor"}, each a short paragraph.
+
+Assemble from the provided pieces. Do not invent new facts. Do not add keys. Do not include markdown.
+
+INPUT:
+TITLE:
+{title}
+
+SUMMARY:
+{summary}
+
+BULLETS(JSON):
+{bullets_json}
+
+FACTS(JSON):
+{facts_json}
+
+TALKS:
+- general: {talk_general}
+- entrepreneur: {talk_entrepreneur}
+- politician: {talk_politician}
+- investor: {talk_investor}
+"""
+
 # === LangSmith 프롬프트 실행 ===
 def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
     """본문 전체(input_text)만 각 프롬프트의 입력으로 사용.
@@ -181,9 +212,9 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         tp = (_llm | _str).invoke(_hub("talks_politician").format(summary=summary, bullets=bullets_block)).strip()
         ti = (_llm | _str).invoke(_hub("talks_investor").format(summary=summary, bullets=bullets_block)).strip()
 
-        # 최종 JSON 조립 (final-json 프롬프트에 조각 전달)
+        # 최종 JSON 조립 (final은 하드코딩 템플릿 사용)
         final_payload = (_llm | _json).invoke(
-            _hub("final").format(
+            FINAL_PROMPT.format(
                 title=title,
                 summary=summary,
                 bullets_json=json.dumps(bullets, ensure_ascii=False),
