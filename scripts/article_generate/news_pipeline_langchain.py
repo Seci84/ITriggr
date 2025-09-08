@@ -248,10 +248,10 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
 
         # talks (각 프롬프트는 summary, bullets만 입력받도록 설계)
         bullets_block = "\n".join(f"- {b}" for b in bullets)
-        tg = (_llm | _str).invoke(_format_prompt(_hub("talks_general"), summary=summary, bullets=bullets_block)).strip()
-        te = (_llm | _str).invoke(_format_prompt(_hub("talks_entrepreneur"), summary=summary, bullets=bullets_block)).strip()
-        tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), summary=summary, bullets=bullets_block)).strip()
-        ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), summary=summary, bullets=bullets_block)).strip()
+        tg = (_llm | _str).invoke(_format_prompt(_hub("talks_general"), input=input_text, summary=summary, bullets=bullets_block)).strip()
+        te = (_llm | _str).invoke(_format_prompt(_hub("talks_entrepreneur"), input=input_text, summary=summary, bullets=bullets_block)).strip()
+        tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary, bullets=bullets_block)).strip()
+        ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary, bullets=bullets_block)).strip()
 
         # 최종 JSON 조립 (final은 하드코딩 템플릿 사용)
         final_payload = (_llm | _json).invoke(
