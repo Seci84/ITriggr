@@ -1,7 +1,3 @@
-# 실제 뉴스 가져와 요약하고 Firestore에 저장하는 메인 로직.
-# 프롬프트 하드코딩 X
-# LangSmith에서 프롬프트 불러오기 → 모델 실행 → Firestore 저장
-
 import os
 import re
 import json
@@ -181,14 +177,13 @@ TALKS:
 """
 
 # === 프롬프트 포맷팅 유틸 (변수명 자동 매핑) ===
-
 def _format_prompt(p, **vals):
     """
     LangSmith Prompt에서 input_variables가 'text' 또는 '"text"'처럼 들어와도 동작하도록
     - 변수명 정규화(따옴표 제거)
     - 원본 키와 정규화 키를 모두 채움
     - text 자동 보충(input → summary+bullets)
-    - 누락 키 발견 시 원본/정규화 둘 다 채우며 반복 재시도
+    - 누락 키 발견 시 원본/정규화 둘 다 채워가며 반복 재시도
     """
 
     # 0) 변수명 정규화('"text"' -> text)
@@ -224,11 +219,12 @@ def _format_prompt(p, **vals):
         if v_raw in vals and v_norm not in vals:
             vals[v_norm] = vals[v_raw]
         if v_raw not in vals and v_norm not in vals:
+            print(f"[WARNING] Missing variable {v_raw}, setting to empty string")
             vals[v_norm] = ""
             vals[v_raw] = ""
 
     # 5) text 자동 보충: 요구하지만 비어 있으면 input → summary+bullets
-    needs_text = any(vn == "text" for _, vn in iv_pairs)
+    needs_text = any(vn == "text" or vn == '"text"' for _, vn in iv_pairs)  # 따옴표 포함 확인
     if needs_text:
         has_text = (vals.get("text") or vals.get('"text"'))
         if not has_text:
@@ -246,11 +242,11 @@ def _format_prompt(p, **vals):
         except KeyError as e:
             missing_raw = str(e).strip()
             missing_norm = norm_key(missing_raw)
+            print(f"[WARNING] KeyError for {missing_raw}, setting to empty string")
             if missing_raw not in vals:
                 vals[missing_raw] = ""
             if missing_norm not in vals:
                 vals[missing_norm] = vals[missing_raw]
-
 
 # === LangSmith 프롬프트 실행 ===
 def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
@@ -336,14 +332,22 @@ def run_once():
                     model_used = "langsmith:gpt-4o-mini"
                 else:
                     payload = make_payload_from_sources(items)
+                    print(f"[WARNING] Fallback payload used for {cluster_key}")
             except Exception as e:
                 print(f"[LangSmith path] error: {e}")
                 payload = make_payload_from_sources(items)
+                print(f"[WARNING] Fallback payload used for {cluster_key} due to exception")
         else:
             payload = make_payload_from_sources(items)
 
         if payload is None:
             payload = make_payload_from_sources(items)
+            print(f"[WARNING] Null payload detected, using fallback for {cluster_key}")
+
+        # 페이로드가 기본 템플릿인지 확인하고 경고
+        if payload.get("summary") == "Template summary (LLM disabled)" and USE_OPENAI:
+            print(f"[WARNING] Template payload detected for {cluster_key}, skipping save")
+            continue
 
         doc = {
             "cluster_key": cluster_key,
