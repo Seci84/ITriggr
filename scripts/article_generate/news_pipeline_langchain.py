@@ -196,8 +196,9 @@ def _format_prompt(p, **vals):
         input_vars_raw = list(getattr(p, "input_variables", []) or [])
         if not input_vars_raw and hasattr(p, "spec"):
             input_vars_raw = list(getattr(p.spec, "input_variables", []) or [])
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ERROR] Failed to get input_variables: {e}")
+        input_vars_raw = []
     iv_pairs = [(v, norm_key(v)) for v in input_vars_raw]
 
     # 2) input 별칭 자동 복사 (+ 따옴표 버전도 같이)
@@ -224,16 +225,19 @@ def _format_prompt(p, **vals):
             vals[v_raw] = ""
 
     # 5) text 자동 보충: 요구하지만 비어 있으면 input → summary+bullets
-    needs_text = any(vn == "text" or vn == '"text"' for _, vn in iv_pairs)  # 따옴표 포함 확인
+    needs_text = any(vn == "text" or vn == '"text"' for _, vn in iv_pairs)
     if needs_text:
-        has_text = (vals.get("text") or vals.get('"text"'))
+        has_text = bool(vals.get("text") or vals.get('"text"'))
         if not has_text:
-            base_text = vals.get("input") or ""
+            base_text = vals.get("input", "")
             if not base_text:
                 btxt = vals.get("bullets") or vals.get("bullets_block") or ""
                 base_text = (vals.get("summary", "") + (("\n" + btxt) if btxt else "")).strip()
+            if not base_text:
+                base_text = "No content available"  # 명시적 기본값
             vals["text"] = base_text
             vals['"text"'] = base_text
+        print(f"[DEBUG] Using text: {vals.get('text')[:50]}...")  # 디버깅용
 
     # 6) 안전 포맷: 누락 키가 나오면 원본/정규화 둘 다 채워가며 반복
     while True:
@@ -255,6 +259,7 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
     if not _llm:
         return None
     try:
+        print(f"[DEBUG] Input text length: {len(input_text)}")  # 입력 데이터 확인
         # summary
         summary = (_llm | _str).invoke(_format_prompt(_hub("summary"), input=input_text)).strip()
 
@@ -295,7 +300,7 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         )
         return final_payload
     except Exception as e:
-        print(f"[HubBuild] error: {e}")
+        print(f"[HubBuild] error: {e}, input_text: {input_text[:100]}...")  # 예외 발생 시 입력 확인
         return None
 
 # === 메인 파이프라인 ===
