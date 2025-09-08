@@ -196,21 +196,30 @@ def _format_prompt(p, **vals):
         vals.setdefault("urls", vals["sources"])
 
     # 3) 누락 변수 자동 채움
+
     input_vars = []
     try:
         input_vars = list(getattr(p, "input_variables", []) or [])
+        if not input_vars:
+            spec = getattr(p, "spec", None)
+            if spec is not None:
+                input_vars = list(getattr(spec, "input_variables", []) or [])
     except Exception:
         pass
     for v in input_vars:
         vals.setdefault(v, "")
 
-    try:
-        return p.format(**vals)
-    except KeyError as e:
-        # 마지막 방어: 남은 누락 키를 공백으로 채워 재시도
-        missing = str(e).strip("'")
-        vals[missing] = ""
-        return p.format(**vals)
+    # 4) 누락 키를 반복적으로 채우면서 안전 포맷
+    while True:
+        try:
+            return p.format(**vals)
+        except KeyError as e:
+            missing = str(e).strip().strip('"').strip("'")
+            # 방어적으로 공백/빈 키는 무시
+            if not missing:
+                raise
+            vals.setdefault(missing, "")    
+
 
 # === LangSmith 프롬프트 실행 ===
 def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
