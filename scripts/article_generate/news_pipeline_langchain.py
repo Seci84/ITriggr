@@ -44,7 +44,7 @@ if os.getenv("LANGSMITH_API_KEY"):
 PROMPT_IDS = {
     "title":              "news-title:2025-09-04",
     "summary":            "news-summary:2025-09-04",
-    "bullets":            "news-bullets:2025-09-04",
+    "bullets":            "news-bullets:2025-09-08",
     "facts":              "news-facts:2025-09-04",
     "talks_general":      "talks-general:2025-09-04",
     "talks_entrepreneur": "talks-entrepreneur:2025-09-04",
@@ -260,16 +260,14 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         return None
     try:
         print(f"[DEBUG] Received input_text length: {len(input_text)}, sample: {input_text[:100]}...")
+        
         # summary
         summary = (_llm | _str).invoke(_format_prompt(_hub("summary"), input=input_text)).strip()
         print(f"[DEBUG] Summary generated: {summary[:50]}...")
 
-        # bullets
-        bullets_raw = (_llm | _str).invoke(_format_prompt(_hub("bullets"), input=input_text)).strip()
-        bullets = [l.strip("•- \t") for l in bullets_raw.splitlines() if l.strip()]
-        while len(bullets) < 3:
-            bullets.append("Additional key point")
-        bullets = bullets[:3]
+        # bullets (JSON 배열로 수신)
+        bullets_raw = (_llm | _json).invoke(_format_prompt(_hub("bullets"), input=input_text))
+        bullets = bullets_raw if isinstance(bullets_raw, list) and len(bullets_raw) == 3 else ["Key point 1", "Key point 2", "Key point 3"]
         print(f"[DEBUG] Bullets generated: {bullets}")
 
         # title
@@ -282,14 +280,15 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         )
         print(f"[DEBUG] Facts generated: {facts}")
 
-        # talks (각 프롬프트는 summary, bullets만 입력받도록 설계)
+        # talks
+        summary_text = summary  # 단일 문자열 사용
         bullets_block = "\n".join(f"- {b}" for b in bullets)
-        tg = (_llm | _str).invoke(_format_prompt(_hub("talks_general"), input=input_text, summary=summary, bullets=bullets_block)).strip()
-        te = (_llm | _str).invoke(_format_prompt(_hub("talks_entrepreneur"), input=input_text, summary=summary, bullets=bullets_block)).strip()
-        tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary, bullets=bullets_block)).strip()
-        ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary, bullets=bullets_block)).strip()
+        tg = (_llm | _str).invoke(_format_prompt(_hub("talks_general"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
+        te = (_llm | _str).invoke(_format_prompt(_hub("talks_entrepreneur"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
+        tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
+        ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
 
-        # 최종 JSON 직접 조립 (LLM 호출 피함)
+        # 최종 JSON 직접 조립
         final_payload = {
             "title": title,
             "summary": summary,
