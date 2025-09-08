@@ -253,7 +253,6 @@ def _format_prompt(p, **vals):
                 vals[missing_norm] = vals[missing_raw]
 
 # === LangSmith 프롬프트 실행 ===
-# === LangSmith 프롬프트 실행 ===
 def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
     """본문 전체(input_text)만 각 프롬프트의 입력으로 사용.
        facts만 추가로 sources(증거 URL 목록) 전달."""
@@ -290,18 +289,17 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary, bullets=bullets_block)).strip()
         ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary, bullets=bullets_block)).strip()
 
-        # 최종 JSON 조립 (final은 하드코딩 템플릿 사용)
+        # 최종 JSON 조립 (final은 하드코딩 템플릿 사용, text 추가로 제공)
         final_payload = (_llm | _json).invoke(
-            FINAL_PROMPT.format(
-                title=title,
-                summary=summary,
-                bullets_json=json.dumps(bullets, ensure_ascii=False),
-                facts_json=json.dumps(facts, ensure_ascii=False),
-                talk_general=tg,
-                talk_entrepreneur=te,
-                talk_politician=tp,
-                talk_investor=ti,
-            )
+            _format_prompt(_hub("summary"), input=input_text,  # text를 명시적으로 제공
+                          title=title,
+                          summary=summary,
+                          bullets_json=json.dumps(bullets, ensure_ascii=False),
+                          facts_json=json.dumps(facts, ensure_ascii=False),
+                          talk_general=tg,
+                          talk_entrepreneur=te,
+                          talk_politician=tp,
+                          talk_investor=ti)
         )
         print(f"[DEBUG] Final payload: {final_payload}")
         return final_payload
@@ -309,7 +307,7 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         print(f"[HubBuild] error: {e}, input_text: {input_text[:100]}...")
         return None
 
-# === 메인 파이프라인 ===
+
 # === 메인 파이프라인 ===
 def run_once():
     db = init_db()
@@ -340,9 +338,9 @@ def run_once():
                 input_text = "\n\n".join(combined_texts)
                 payload = build_with_hub_prompts(input_text, evidence_urls)
                 latency_ms = int((time.time() - t0) * 1000)
-                if payload:
+                if payload and payload.get("summary") != "Template summary (LLM disabled)":
                     model_used = "langsmith:gpt-4o-mini"
-                    print(f"[DEBUG] Payload received for {cluster_key}: {payload.get('summary')[:50]}...")
+                    print(f"[DEBUG] Valid payload received for {cluster_key}: {payload.get('summary')[:50]}...")
                 else:
                     payload = make_payload_from_sources(items)
                     print(f"[WARNING] Fallback payload used for {cluster_key}")
@@ -357,11 +355,8 @@ def run_once():
             payload = make_payload_from_sources(items)
             print(f"[WARNING] Null payload detected, using fallback for {cluster_key}")
 
-        # 페이로드가 기본 템플릿인지 확인 (더 엄격한 조건)
-        is_template = payload.get("summary") == "Template summary (LLM disabled)" and all(
-            k in payload and not payload[k] for k in ["title", "bullets", "facts", "talks"]
-        )
-        if is_template and USE_OPENAI:
+        # 페이로드가 기본 템플릿인지 확인
+        if payload.get("summary") == "Template summary (LLM disabled)" and USE_OPENAI:
             print(f"[WARNING] Template payload detected for {cluster_key}, skipping save")
             continue
 
