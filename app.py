@@ -316,7 +316,7 @@ def save_talks_to_doc(kind: str, doc_id: str, talks: Dict):
     """talks를 문서에 병합 저장."""
     try:
         if kind == "generated":
-            db.collection("generated_articles_v3").document(doc_id).set({"talks": talks}, merge=True)
+            db.collection("generated_articles_v4").document(doc_id).set({"talks": talks}, merge=True)
         elif kind == "public":
             # 퍼블릭에도 저장하려면 주석 해제:
             # db.collection("public_articles").document(doc_id).set({"talks": talks}, merge=True)
