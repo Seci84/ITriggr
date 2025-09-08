@@ -183,42 +183,84 @@ TALKS:
 # === 프롬프트 포맷팅 유틸 (변수명 자동 매핑) ===
 def _format_prompt(p, **vals):
     """
-    LangSmith Prompt가 요구하는 input_variables가 'text'/'content' 등일 때
+    LangSmith Prompt가 요구하는 input_variables가 'text'/'"text"'/'content' 등일 때
     코드에서 전달한 'input'을 자동으로 매핑해줌. 누락 변수는 빈 문자열로 채움.
+    또한 따옴표가 포함된 변수명('"text"')도 정규화하여 양쪽 키를 모두 채운다.
     """
-    # 1) input 별칭 자동 복사
+
+    # --- 0) 유틸: 변수명 정규화('"text"' -> text)
+    def norm_key(k: str) -> str:
+        return (k or "").strip().strip('"').strip("'")
+
+    # --- 1) LangSmith 프롬프트의 입력 변수 수집 (두 경로)
+    input_vars_raw = []
+    try:
+        input_vars_raw = list(getattr(p, "input_variables", []) or [])
+        if not input_vars_raw and hasattr(p, "spec"):
+            input_vars_raw = list(getattr(p.spec, "input_variables", []) or [])
+    except Exception:
+        pass
+
+    # 원본/정규화 쌍 만들기
+    iv_pairs = []
+    for v in input_vars_raw:
+        v_norm = norm_key(v)
+        iv_pairs.append((v, v_norm))
+
+    # --- 2) input 별칭 자동 복사 (+ 따옴표 키도 같이 채움)
     if "input" in vals:
         for alias in ("text", "content", "article", "body", "document", "docs"):
             vals.setdefault(alias, vals["input"])
-    # 2) sources 별칭도 약하게 보완
+            # 따옴표 버전도 채움
+            quoted_alias = f'"{alias}"'
+            vals.setdefault(quoted_alias, vals[alias])
+
+    # --- 3) sources 별칭 보완 (+ 따옴표 키도 같이 채움)
     if "sources" in vals:
-        vals.setdefault("evidence_urls", vals["sources"])
-        vals.setdefault("urls", vals["sources"])
+        for alias in ("evidence_urls", "urls"):
+            vals.setdefault(alias, vals["sources"])
+            quoted_alias = f'"{alias}"'
+            vals.setdefault(quoted_alias, vals[alias])
 
-    # 3) 누락 변수 자동 채움
+    # --- 4) 프롬프트가 요구하는 모든 변수에 기본값 채움(원본/정규화 양쪽)
+    for v_raw, v_norm in iv_pairs:
+        # 정규화 키가 이미 있으면 원본 키도 동기화
+        if v_norm in vals and v_raw not in vals:
+            vals[v_raw] = vals[v_norm]
+        # 원본 키가 있으면 정규화 키도 동기화
+        if v_raw in vals and v_norm not in vals:
+            vals[v_norm] = vals[v_raw]
+        # 둘 다 없으면 공백으로 채우고 양쪽 동기화
+        if v_raw not in vals and v_norm not in vals:
+            vals[v_norm] = ""
+            vals[v_raw] = ""
 
-    input_vars = []
-    try:
-        input_vars = list(getattr(p, "input_variables", []) or [])
-        if not input_vars:
-            spec = getattr(p, "spec", None)
-            if spec is not None:
-                input_vars = list(getattr(spec, "input_variables", []) or [])
-    except Exception:
-        pass
-    for v in input_vars:
-        vals.setdefault(v, "")
+    # --- 5) 특별 케이스: text 자동 보충 (요구하지만 비어있을 때 input → summary+bullets)
+    #     원본/정규화 키 모두 커버
+    needs_text = any(vn == "text" for _, vn in iv_pairs)
+    if needs_text:
+        text_has = ("text" in vals and vals["text"]) or ('"text"' in vals and vals['"text"'])
+        if not text_has:
+            base_text = vals.get("input") or ""
+            if not base_text:
+                btxt = vals.get("bullets") or vals.get("bullets_block") or ""
+                base_text = (vals.get("summary", "") + ("\n" + btxt if btxt else "")).strip()
+            vals["text"] = base_text
+            vals['"text"'] = base_text
 
-    # 4) 누락 키를 반복적으로 채우면서 안전 포맷
+    # --- 6) 안전 포맷(누락 키 발견 시 원본/정규화 둘 다 채워서 재시도)
     while True:
         try:
             return p.format(**vals)
         except KeyError as e:
-            missing = str(e).strip().strip('"').strip("'")
-            # 방어적으로 공백/빈 키는 무시
-            if not missing:
-                raise
-            vals.setdefault(missing, "")    
+            missing_raw = str(e).strip()
+            missing_norm = norm_key(missing_raw)
+            # 둘 다 채우기
+            if missing_raw not in vals:
+                vals[missing_raw] = ""
+            if missing_norm not in vals:
+                vals[missing_norm] = vals[missing_raw]
+
 
 
 # === LangSmith 프롬프트 실행 ===
