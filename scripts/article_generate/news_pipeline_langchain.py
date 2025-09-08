@@ -289,27 +289,25 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary, bullets=bullets_block)).strip()
         ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary, bullets=bullets_block)).strip()
 
-        # 최종 JSON 조립 (수정: JSON 강제 지시 및 오류 처리)
-        final_input = FINAL_PROMPT.format(
-            title=title,
-            summary=summary,
-            bullets_json=json.dumps(bullets, ensure_ascii=False),
-            facts_json=json.dumps(facts, ensure_ascii=False),
-            talk_general=tg,
-            talk_entrepreneur=te,
-            talk_politician=tp,
-            talk_investor=ti,
-        )
-        try:
-            final_payload = (_llm | _json).invoke(final_input)
-            print(f"[DEBUG] Final payload: {final_payload}")
-        except Exception as e:
-            print(f"[HubBuild] error: Invalid JSON output: {e}, raw output: {final_input[:200]}...")
-            return None
+        # 최종 JSON 직접 조립 (LLM 호출 피함)
+        final_payload = {
+            "title": title,
+            "summary": summary,
+            "bullets": bullets,
+            "facts": facts if isinstance(facts, list) else [],
+            "talks": {
+                "general": tg,
+                "entrepreneur": te,
+                "politician": tp,
+                "investor": ti
+            }
+        }
+        print(f"[DEBUG] Final payload: {final_payload}")
         return final_payload
     except Exception as e:
         print(f"[HubBuild] error: {e}, input_text: {input_text[:100]}...")
         return None
+
 
 # === 메인 파이프라인 ===
 def run_once():
