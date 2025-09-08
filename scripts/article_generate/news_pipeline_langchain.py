@@ -253,15 +253,17 @@ def _format_prompt(p, **vals):
                 vals[missing_norm] = vals[missing_raw]
 
 # === LangSmith 프롬프트 실행 ===
+# === LangSmith 프롬프트 실행 ===
 def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
     """본문 전체(input_text)만 각 프롬프트의 입력으로 사용.
        facts만 추가로 sources(증거 URL 목록) 전달."""
     if not _llm:
         return None
     try:
-        print(f"[DEBUG] Input text length: {len(input_text)}")  # 입력 데이터 확인
+        print(f"[DEBUG] Received input_text length: {len(input_text)}, sample: {input_text[:100]}...")
         # summary
         summary = (_llm | _str).invoke(_format_prompt(_hub("summary"), input=input_text)).strip()
+        print(f"[DEBUG] Summary generated: {summary[:50]}...")
 
         # bullets
         bullets_raw = (_llm | _str).invoke(_format_prompt(_hub("bullets"), input=input_text)).strip()
@@ -269,14 +271,17 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         while len(bullets) < 3:
             bullets.append("Additional key point")
         bullets = bullets[:3]
+        print(f"[DEBUG] Bullets generated: {bullets}")
 
         # title
         title = (_llm | _str).invoke(_format_prompt(_hub("title"), input=input_text)).strip()
+        print(f"[DEBUG] Title generated: {title}")
 
         # facts (JSON)
         facts = (_llm | _json).invoke(
             _format_prompt(_hub("facts"), input=input_text, sources="\n".join(sources))
         )
+        print(f"[DEBUG] Facts generated: {facts}")
 
         # talks (각 프롬프트는 summary, bullets만 입력받도록 설계)
         bullets_block = "\n".join(f"- {b}" for b in bullets)
@@ -298,11 +303,13 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
                 talk_investor=ti,
             )
         )
+        print(f"[DEBUG] Final payload: {final_payload}")
         return final_payload
     except Exception as e:
-        print(f"[HubBuild] error: {e}, input_text: {input_text[:100]}...")  # 예외 발생 시 입력 확인
+        print(f"[HubBuild] error: {e}, input_text: {input_text[:100]}...")
         return None
 
+# === 메인 파이프라인 ===
 # === 메인 파이프라인 ===
 def run_once():
     db = init_db()
@@ -332,9 +339,10 @@ def run_once():
                 t0 = time.time()
                 input_text = "\n\n".join(combined_texts)
                 payload = build_with_hub_prompts(input_text, evidence_urls)
-                latency_ms = int((time.time()-t0)*1000)
+                latency_ms = int((time.time() - t0) * 1000)
                 if payload:
                     model_used = "langsmith:gpt-4o-mini"
+                    print(f"[DEBUG] Payload received for {cluster_key}: {payload.get('summary')[:50]}...")
                 else:
                     payload = make_payload_from_sources(items)
                     print(f"[WARNING] Fallback payload used for {cluster_key}")
@@ -349,8 +357,11 @@ def run_once():
             payload = make_payload_from_sources(items)
             print(f"[WARNING] Null payload detected, using fallback for {cluster_key}")
 
-        # 페이로드가 기본 템플릿인지 확인하고 경고
-        if payload.get("summary") == "Template summary (LLM disabled)" and USE_OPENAI:
+        # 페이로드가 기본 템플릿인지 확인 (더 엄격한 조건)
+        is_template = payload.get("summary") == "Template summary (LLM disabled)" and all(
+            k in payload and not payload[k] for k in ["title", "bullets", "facts", "talks"]
+        )
+        if is_template and USE_OPENAI:
             print(f"[WARNING] Template payload detected for {cluster_key}, skipping save")
             continue
 
@@ -365,17 +376,21 @@ def run_once():
             "raw_refs": [x[0] for x in items],
             "published_window": {"start": ts_min, "end": ts_max},
             "model": model_used,
-            "token_usage": {},              # LangSmith에서 usage 추적
+            "token_usage": {},  # LangSmith에서 usage 추적
             "latency_ms": latency_ms,
-            "schema_version": "talks_v1",   # 저장 구조 변경 없음
+            "schema_version": "talks_v1",  # 저장 구조 변경 없음
             "created_at": firestore.SERVER_TIMESTAMP,
         }
-        db.collection("generated_articles_v4").add(doc)
-        created += 1
-        print(f"[OK] Generated {cluster_key}, total={created}")
+        try:
+            db.collection("generated_articles_v4").add(doc)
+            created += 1
+            print(f"[OK] Generated {cluster_key}, total={created}")
+        except Exception as e:
+            print(f"[ERROR] Failed to save to Firestore for {cluster_key}: {e}")
 
     log_event(db, "generate_done_v4", {"created": created})
     print(f"Done. groups={len(groups)}, created={created}")
+
 
 if __name__ == "__main__":
     run_once()
