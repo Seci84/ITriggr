@@ -147,14 +147,14 @@ def make_payload_from_sources(items):
 
 # === final 하드코딩 프롬프트 ===
 FINAL_PROMPT = """You are a strict JSON assembler.
-Return only a strict minified JSON object with keys: title, summary, bullets, facts, talks.
+Return ONLY a strict minified JSON object with keys: title, summary, bullets, facts, talks.
 - title: string
 - summary: string
 - bullets: array of exactly 3 short strings
 - facts: array of objects: {"text": string, "evidence_url": string}
 - talks: object with keys {"general","entrepreneur","politician","investor"}, each a short paragraph.
 
-Assemble from the provided pieces. Do not invent new facts. Do not add keys. Do not include markdown.
+Assemble from the provided pieces. Do NOT invent new facts. Do NOT add keys. Do NOT include markdown or explanatory text outside the JSON.
 
 INPUT:
 TITLE:
@@ -289,24 +289,27 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary, bullets=bullets_block)).strip()
         ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary, bullets=bullets_block)).strip()
 
-        # 최종 JSON 조립 (final은 하드코딩 템플릿 사용, text 추가로 제공)
-        final_payload = (_llm | _json).invoke(
-            _format_prompt(_hub("summary"), input=input_text,  # text를 명시적으로 제공
-                          title=title,
-                          summary=summary,
-                          bullets_json=json.dumps(bullets, ensure_ascii=False),
-                          facts_json=json.dumps(facts, ensure_ascii=False),
-                          talk_general=tg,
-                          talk_entrepreneur=te,
-                          talk_politician=tp,
-                          talk_investor=ti)
+        # 최종 JSON 조립 (수정: JSON 강제 지시 및 오류 처리)
+        final_input = FINAL_PROMPT.format(
+            title=title,
+            summary=summary,
+            bullets_json=json.dumps(bullets, ensure_ascii=False),
+            facts_json=json.dumps(facts, ensure_ascii=False),
+            talk_general=tg,
+            talk_entrepreneur=te,
+            talk_politician=tp,
+            talk_investor=ti,
         )
-        print(f"[DEBUG] Final payload: {final_payload}")
+        try:
+            final_payload = (_llm | _json).invoke(final_input)
+            print(f"[DEBUG] Final payload: {final_payload}")
+        except Exception as e:
+            print(f"[HubBuild] error: Invalid JSON output: {e}, raw output: {final_input[:200]}...")
+            return None
         return final_payload
     except Exception as e:
         print(f"[HubBuild] error: {e}, input_text: {input_text[:100]}...")
         return None
-
 
 # === 메인 파이프라인 ===
 def run_once():
@@ -355,10 +358,12 @@ def run_once():
             payload = make_payload_from_sources(items)
             print(f"[WARNING] Null payload detected, using fallback for {cluster_key}")
 
-        # 페이로드가 기본 템플릿인지 확인
+        # 페이로드가 기본 템플릿인지 확인, 최소한의 데이터라도 저장
         if payload.get("summary") == "Template summary (LLM disabled)" and USE_OPENAI:
-            print(f"[WARNING] Template payload detected for {cluster_key}, skipping save")
-            continue
+            print(f"[WARNING] Template payload detected for {cluster_key}, saving with fallback")
+            # 기본 페이로드라도 최소한의 데이터 저장
+        else:
+            print(f"[DEBUG] Saving payload for {cluster_key}: {payload.get('summary')[:50]}...")
 
         doc = {
             "cluster_key": cluster_key,
