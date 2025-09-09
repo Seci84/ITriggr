@@ -4,8 +4,8 @@
 import os, requests, feedparser
 from common import init_db, now_epoch, to_epoch, normalize, sha256, simhash, log_event, doc_id_from_url
 from firebase_admin import firestore
-
-
+from process_articles import analyze_and_save
+import asyncio
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 RSS_SOURCES = os.getenv("RSS_SOURCES", "")
@@ -118,8 +118,15 @@ if __name__ == "__main__":
         print("No items")
         raise SystemExit(0)
 
-
     saved, skipped, updated = save_raw(db, all_items)
     log_event(db, "ingest_done", {"saved": saved, "updated": updated, "total": len(all_items)})
     print(f"saved={saved} updated={updated} total={len(all_items)}")
+
+    # --- process_articles.py 통합 ---
+    try:
+        asyncio.run(analyze_and_save(db, all_items))
+        log_event(db, "filter_done", {"status": "success"})
+    except Exception as e:
+        log_event(db, "err_filter", {"msg": str(e)})
+        print(f"Filter error: {e}")
 
