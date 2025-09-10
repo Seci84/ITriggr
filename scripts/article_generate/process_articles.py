@@ -178,6 +178,8 @@ def save_filtered(db, items: List[Dict]):
             "action_score": score,
             "action_reason": reason,
             "crawl_status": item.get("crawl_status", "unknown"),
+            # 위키 컨텍스트 저장(스키마에 영향 없이 선택 필드로 추가)
+            "wiki_context": item.get("wiki_context", ""),
             "llm_processed_at": firestore.SERVER_TIMESTAMP,
             "created_at": firestore.SERVER_TIMESTAMP
         }
