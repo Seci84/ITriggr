@@ -112,7 +112,7 @@ def load_recent_raw_groups(db, window_sec=6*60*60, prefix_bits=16,
 
     now = int(time.time())
     since = now - window_sec
-    q = db.collection("raw_articles").where(filter=FieldFilter("published_at", ">=", since))
+    q = db.collection("raw_articles_v6").where(filter=FieldFilter("published_at", ">=", since))
     groups = defaultdict(list)
 
     total, skipped = 0, 0
@@ -215,9 +215,9 @@ def run_once():
         print("No items")
         return
 
-    # 2. raw_articles 저장
+    # 2. raw_articles_v6 저장
     saved, skipped, updated = 0, 0, 0
-    col_raw = db.collection("raw_articles")
+    col_raw = db.collection("raw_articles_v6")
     for it in all_items:
         url = it["url"]
         doc_id = sha256(url)  # fetch_news.py와 동일
