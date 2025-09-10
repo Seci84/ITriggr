@@ -48,3 +48,4 @@ loguru>=0.7.0               # 로깅 개선 (log_event 대체 가능성)
 
 lxml==5.2.2
 lxml_html_clean==0.2.0
+simhash==2.0.1
