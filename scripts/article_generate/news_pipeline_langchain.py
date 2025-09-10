@@ -257,17 +257,35 @@ def run_once():
     for cluster_key, items in groups.items():
         if len(items) < 1 or already_generated(db, cluster_key):
             continue
-
+    
         evidence_urls, combined_texts = [], []
         ts_min, ts_max = 10**12, 0
         for _id, it in items:
             url = it.get("url", "")
             title = it.get("title", "")
             content = fetch_content(url)
+    
+            # 🔹 위키 컨텍스트 생성
+            try:
+                aug = augment_with_wiki({
+                    "content": content,
+                    "content_hint": it.get("content_hint", "")
+                })
+                wiki_ctx = aug.get("wiki_context", "")
+            except Exception:
+                wiki_ctx = ""
+    
             evidence_urls.append(url)
-            combined_texts.append(f"{title}\n{content}")
+    
+            # 🔹 위키 컨텍스트를 LLM 입력 텍스트에만 덧붙임(존재할 때만)
+            if wiki_ctx:
+                combined_texts.append(f"{title}\n{content}\n\n[WIKI]\n{wiki_ctx}")
+            else:
+                combined_texts.append(f"{title}\n{content}")
+    
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
+
 
         payload, latency_ms, model_used = None, 0, "template"
         if USE_OPENAI:
