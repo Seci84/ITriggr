@@ -11,12 +11,16 @@ from bs4 import BeautifulSoup
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 
-from common import init_db, log_event, sim_prefix
+from common import init_db, log_event, sim_prefix, normalize, sha256, to_epoch, now_epoch
+from fetch_news import fetch_newsapi, fetch_rss
+from process_articles import fetch_contents, build_actionability, save_filtered
+from rag import augment_with_wiki
+import asyncio
 
 # === LangChain / LangSmith ===
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
-from langsmith import Client  # ← LangSmith SDK만 사용 (hub.deprecated 제거)
+from langsmith import Client
 
 # --- OpenAI 사용 여부 ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -40,16 +44,17 @@ if os.getenv("LANGSMITH_API_KEY"):
     os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
     os.environ.setdefault("LANGCHAIN_PROJECT", os.getenv("LANGSMITH_PROJECT", "news-pipeline"))
 
-# === LangSmith Prompt IDs (Personal 워크스페이스: owner 생략) ===
+# === LangSmith Prompt IDs ===
 PROMPT_IDS = {
-    "title":              "news-title:2025-09-04",
-    "summary":            "news-summary:2025-09-04",
-    "bullets":            "news-bullets:2025-09-08",
-    "facts":              "news-facts:2025-09-04",
-    "talks_general":      "talks-general:2025-09-04",
+    "title": "news-title:2025-09-04",
+    "summary": "news-summary:2025-09-04",
+    "bullets": "news-bullets:2025-09-08",
+    "facts": "news-facts:2025-09-04",
+    "talks_general": "talks-general:2025-09-04",
     "talks_entrepreneur": "talks-entrepreneur:2025-09-04",
-    "talks_politician":   "talks-politician:2025-09-04",
-    "talks_investor":     "talks-investor:2025-09-04",
+    "talks_politician": "talks-politician:2025-09-04",
+    "talks_investor": "talks-investor:2025-09-04",
+    "actionability": "actionability:2025-09-09"  # process_articles.py와 통합
 }
 
 _ls = Client()
@@ -60,13 +65,13 @@ def _hub(name: str):
     """LangSmith에서 프롬프트를 끌어오되, 태그 못 찾으면 :latest로 폴백"""
     pid = PROMPT_IDS[name]
     try:
-        return _ls.pull_prompt(pid)  # e.g., "news-summary:2025-09-04"
+        return _ls.pull_prompt(pid)
     except Exception:
         base = pid.split(":", 1)[0]
         print(f"[Hub] Falling back to latest for {base}")
         return _ls.pull_prompt(f"{base}:latest")
 
-# --- 유틸 ---
+# --- 유틸 (기존 그대로 유지) ---
 def safe_parse_json(content: str):
     try:
         return json.loads(content)
@@ -83,7 +88,7 @@ def safe_parse_json(content: str):
     raise ValueError(f"JSON parse failed. head={content[:120]!r}")
 
 def fetch_content(url):
-    """URL에서 기사 본문 추출"""
+    """URL에서 기사 본문 추출 (process_articles.py와 통합)"""
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         resp = requests.get(url, headers=headers, timeout=10)
@@ -107,7 +112,7 @@ def load_recent_raw_groups(db, window_sec=6*60*60, prefix_bits=16,
 
     now = int(time.time())
     since = now - window_sec
-    q = db.collection("raw_articles_v6").where(filter=FieldFilter("published_at", ">=", since))
+    q = db.collection("raw_articles").where(filter=FieldFilter("published_at", ">=", since))
     groups = defaultdict(list)
 
     total, skipped = 0, 0
@@ -127,8 +132,8 @@ def load_recent_raw_groups(db, window_sec=6*60*60, prefix_bits=16,
 def already_generated(db, cluster_key: str) -> bool:
     try:
         snap = (db.collection("generated_articles_v6")
-                  .where(filter=FieldFilter("cluster_key", "==", cluster_key))
-                  .limit(1).get())
+                .where(filter=FieldFilter("cluster_key", "==", cluster_key))
+                .limit(1).get())
         return len(snap) > 0
     except Exception as e:
         print(f"already_generated check failed: {e}")
@@ -142,125 +147,17 @@ def make_payload_from_sources(items):
     bullets = ["Key point 1", "Key point 2", "Key point 3"]
     first = items[0][1] if items else {}
     facts = [{"text": first.get("title", ""), "evidence_url": first.get("url", "")}]
-    talks = {"general":"", "entrepreneur":"", "politician":"", "investor":""}
-    return {"title":title, "summary":summary, "bullets":bullets, "facts":facts, "talks":talks}
+    talks = {"general": "", "entrepreneur": "", "politician": "", "investor": ""}
+    return {"title": title, "summary": summary, "bullets": bullets, "facts": facts, "talks": talks}
 
-# === final 하드코딩 프롬프트 ===
-FINAL_PROMPT = """You are a strict JSON assembler.
-Return ONLY a strict minified JSON object with keys: title, summary, bullets, facts, talks.
-- title: string
-- summary: string
-- bullets: array of exactly 3 short strings
-- facts: array of objects: {"text": string, "evidence_url": string}
-- talks: object with keys {"general","entrepreneur","politician","investor"}, each a short paragraph.
-
-Assemble from the provided pieces. Do NOT invent new facts. Do NOT add keys. Do NOT include markdown or explanatory text outside the JSON.
-
-INPUT:
-TITLE:
-{title}
-
-SUMMARY:
-{summary}
-
-BULLETS(JSON):
-{bullets_json}
-
-FACTS(JSON):
-{facts_json}
-
-TALKS:
-- general: {talk_general}
-- entrepreneur: {talk_entrepreneur}
-- politician: {talk_politician}
-- investor: {talk_investor}
-"""
-
-# === 프롬프트 포맷팅 유틸 (변수명 자동 매핑) ===
-def _format_prompt(p, **vals):
-    """
-    LangSmith Prompt에서 input_variables가 'text' 또는 '"text"'처럼 들어와도 동작하도록
-    - 변수명 정규화(따옴표 제거)
-    - 원본 키와 정규화 키를 모두 채움
-    - text 자동 보충(input → summary+bullets)
-    - 누락 키 발견 시 원본/정규화 둘 다 채워가며 반복 재시도
-    """
-
-    # 0) 변수명 정규화('"text"' -> text)
-    def norm_key(k: str) -> str:
-        return (k or "").strip().strip('"').strip("'")
-
-    # 1) 프롬프트 입력 변수 수집
-    input_vars_raw = []
-    try:
-        input_vars_raw = list(getattr(p, "input_variables", []) or [])
-        if not input_vars_raw and hasattr(p, "spec"):
-            input_vars_raw = list(getattr(p.spec, "input_variables", []) or [])
-    except Exception as e:
-        print(f"[ERROR] Failed to get input_variables: {e}")
-        input_vars_raw = []
-    iv_pairs = [(v, norm_key(v)) for v in input_vars_raw]
-
-    # 2) input 별칭 자동 복사 (+ 따옴표 버전도 같이)
-    if "input" in vals:
-        for alias in ("text", "content", "article", "body", "document", "docs"):
-            vals.setdefault(alias, vals["input"])
-            vals.setdefault(f'"{alias}"', vals[alias])
-
-    # 3) sources 별칭 보완 (+ 따옴표 버전도 같이)
-    if "sources" in vals:
-        for alias in ("evidence_urls", "urls"):
-            vals.setdefault(alias, vals["sources"])
-            vals.setdefault(f'"{alias}"', vals[alias])
-
-    # 4) 프롬프트가 요구하는 모든 변수 기본값 채움(원본/정규화 동기화)
-    for v_raw, v_norm in iv_pairs:
-        if v_norm in vals and v_raw not in vals:
-            vals[v_raw] = vals[v_norm]
-        if v_raw in vals and v_norm not in vals:
-            vals[v_norm] = vals[v_raw]
-        if v_raw not in vals and v_norm not in vals:
-            print(f"[WARNING] Missing variable {v_raw}, setting to empty string")
-            vals[v_norm] = ""
-            vals[v_raw] = ""
-
-    # 5) text 자동 보충: 요구하지만 비어 있으면 input → summary+bullets
-    needs_text = any(vn == "text" or vn == '"text"' for _, vn in iv_pairs)
-    if needs_text:
-        has_text = bool(vals.get("text") or vals.get('"text"'))
-        if not has_text:
-            base_text = vals.get("input", "")
-            if not base_text:
-                btxt = vals.get("bullets") or vals.get("bullets_block") or ""
-                base_text = (vals.get("summary", "") + (("\n" + btxt) if btxt else "")).strip()
-            if not base_text:
-                base_text = "No content available"  # 명시적 기본값
-            vals["text"] = base_text
-            vals['"text"'] = base_text
-        print(f"[DEBUG] Using text: {vals.get('text')[:50]}...")  # 디버깅용
-
-    # 6) 안전 포맷: 누락 키가 나오면 원본/정규화 둘 다 채워가며 반복
-    while True:
-        try:
-            return p.format(**vals)
-        except KeyError as e:
-            missing_raw = str(e).strip()
-            missing_norm = norm_key(missing_raw)
-            print(f"[WARNING] KeyError for {missing_raw}, setting to empty string")
-            if missing_raw not in vals:
-                vals[missing_raw] = ""
-            if missing_norm not in vals:
-                vals[missing_norm] = vals[missing_raw]
-
-# === LangSmith 프롬프트 실행 ===
+# === LangSmith 프롬프트 실행 (build_with_hub_prompts 수정) ===
 def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
-    """본문 전체(input_text)만 각 프롬프트의 입력으로 사용.
-       facts만 추가로 sources(증거 URL 목록) 전달."""
+    """본문 전체(input_text)만 각 프롬프트의 입력으로 사용, facts에 sources 전달."""
     if not _llm:
         return None
     try:
         print(f"[DEBUG] Received input_text length: {len(input_text)}, sample: {input_text[:100]}...")
-        
+
         # summary
         summary = (_llm | _str).invoke(_format_prompt(_hub("summary"), input=input_text)).strip()
         print(f"[DEBUG] Summary generated: {summary[:50]}...")
@@ -281,43 +178,84 @@ def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
         print(f"[DEBUG] Facts generated: {facts}")
 
         # talks
-        summary_text = summary  # 단일 문자열 사용
+        summary_text = summary
         bullets_block = "\n".join(f"- {b}" for b in bullets)
         tg = (_llm | _str).invoke(_format_prompt(_hub("talks_general"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
         te = (_llm | _str).invoke(_format_prompt(_hub("talks_entrepreneur"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
         tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
         ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
 
-        # 최종 JSON 직접 조립
-        final_payload = {
+        return {
             "title": title,
             "summary": summary,
             "bullets": bullets,
             "facts": facts if isinstance(facts, list) else [],
-            "talks": {
-                "general": tg,
-                "entrepreneur": te,
-                "politician": tp,
-                "investor": ti
-            }
+            "talks": {"general": tg, "entrepreneur": te, "politician": tp, "investor": ti}
         }
-        print(f"[DEBUG] Final payload: {final_payload}")
-        return final_payload
     except Exception as e:
         print(f"[HubBuild] error: {e}, input_text: {input_text[:100]}...")
         return None
 
-
 # === 메인 파이프라인 ===
 def run_once():
     db = init_db()
+    # 1. 기사 수집
+    all_items = []
+    try:
+        all_items += fetch_newsapi()
+    except Exception as e:
+        log_event(db, "err_newsapi", {"msg": str(e)})
+    try:
+        all_items += fetch_rss()
+    except Exception as e:
+        log_event(db, "err_rss", {"msg": str(e)})
+
+    if not all_items:
+        log_event(db, "no_items", {})
+        print("No items")
+        return
+
+    # 2. raw_articles 저장
+    saved, skipped, updated = 0, 0, 0
+    col_raw = db.collection("raw_articles")
+    for it in all_items:
+        url = it["url"]
+        doc_id = sha256(url)  # fetch_news.py와 동일
+        doc_ref = col_raw.document(doc_id)
+        snap = doc_ref.get()
+        it["url_hash"] = doc_id
+        it["simhash"] = sim_prefix(simhash(f"{it['title']} {it.get('content_hint', '')}"))
+        it.setdefault("created_at", firestore.SERVER_TIMESTAMP)
+
+        if snap.exists:
+            doc_ref.set({
+                "source": it["source"],
+                "source_name": it["source_name"],
+                "title": it["title"],
+                "url": it["url"],
+                "published_at": it["published_at"],
+                "content_hint": it.get("content_hint", ""),
+                "lang": it.get("lang", "en"),
+                "simhash": it["simhash"],
+                "url_hash": it["url_hash"],
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+            updated += 1
+        else:
+            doc_ref.set(it)
+            saved += 1
+    log_event(db, "ingest_done", {"saved": saved, "updated": updated, "total": len(all_items)})
+    print(f"saved={saved} updated={updated} total={len(all_items)}")
+
+    # 3. actionable_articles 필터링 및 RAG
+    asyncio.run(analyze_and_save(db, all_items))
+
+    # 4. 클러스터 처리 (기존 로직 유지)
     groups = load_recent_raw_groups(db)
     created = 0
 
     for cluster_key, items in groups.items():
-        if len(items) < 1:
-            continue
-        if already_generated(db, cluster_key):
+        if len(items) < 1 or already_generated(db, cluster_key):
             continue
 
         evidence_urls, combined_texts = [], []
@@ -340,27 +278,16 @@ def run_once():
                 latency_ms = int((time.time() - t0) * 1000)
                 if payload and payload.get("summary") != "Template summary (LLM disabled)":
                     model_used = "langsmith:gpt-4o-mini"
-                    print(f"[DEBUG] Valid payload received for {cluster_key}: {payload.get('summary')[:50]}...")
                 else:
                     payload = make_payload_from_sources(items)
-                    print(f"[WARNING] Fallback payload used for {cluster_key}")
             except Exception as e:
                 print(f"[LangSmith path] error: {e}")
                 payload = make_payload_from_sources(items)
-                print(f"[WARNING] Fallback payload used for {cluster_key} due to exception")
         else:
             payload = make_payload_from_sources(items)
 
         if payload is None:
             payload = make_payload_from_sources(items)
-            print(f"[WARNING] Null payload detected, using fallback for {cluster_key}")
-
-        # 페이로드가 기본 템플릿인지 확인, 최소한의 데이터라도 저장
-        if payload.get("summary") == "Template summary (LLM disabled)" and USE_OPENAI:
-            print(f"[WARNING] Template payload detected for {cluster_key}, saving with fallback")
-            # 기본 페이로드라도 최소한의 데이터 저장
-        else:
-            print(f"[DEBUG] Saving payload for {cluster_key}: {payload.get('summary')[:50]}...")
 
         doc = {
             "cluster_key": cluster_key,
@@ -373,9 +300,9 @@ def run_once():
             "raw_refs": [x[0] for x in items],
             "published_window": {"start": ts_min, "end": ts_max},
             "model": model_used,
-            "token_usage": {},  # LangSmith에서 usage 추적
+            "token_usage": {},  # LangSmith에서 추적
             "latency_ms": latency_ms,
-            "schema_version": "talks_v1",  # 저장 구조 변경 없음
+            "schema_version": "talks_v1",
             "created_at": firestore.SERVER_TIMESTAMP,
         }
         try:
@@ -387,7 +314,6 @@ def run_once():
 
     log_event(db, "generate_done_v4", {"created": created})
     print(f"Done. groups={len(groups)}, created={created}")
-
 
 if __name__ == "__main__":
     run_once()
