@@ -8,6 +8,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from langsmith import Client
 from firebase_admin import firestore
 from common import normalize, log_event
+from rag import augment_with_wiki
 
 # --- 환경 변수 ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -102,7 +103,18 @@ async def fetch_contents(items: List[Dict]) -> List[Dict]:
         for item, content in zip(items, contents):
             item["content"] = str(content) if not isinstance(content, Exception) else "Content unavailable"
             item["crawl_status"] = "success" if not isinstance(content, Exception) else "failed"
+
+            # 위키 컨텍스트 주입 (USE_RAG이 False면 빈 문자열을 반환)
+            try:
+                aug = augment_with_wiki({
+                    "content": item.get("content", ""),
+                    "content_hint": item.get("content_hint", "")
+                })
+                item["wiki_context"] = aug.get("wiki_context", "")
+            except Exception:
+                item["wiki_context"] = ""
         return items
+
 
 def build_actionability(item: Dict) -> Optional[Dict]:
     """LLM으로 액션 가능성 판단"""
