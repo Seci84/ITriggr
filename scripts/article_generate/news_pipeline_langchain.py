@@ -107,7 +107,7 @@ def load_recent_raw_groups(db, window_sec=6*60*60, prefix_bits=16,
 
     now = int(time.time())
     since = now - window_sec
-    q = db.collection("raw_articles").where(filter=FieldFilter("published_at", ">=", since))
+    q = db.collection("raw_articles_v6").where(filter=FieldFilter("published_at", ">=", since))
     groups = defaultdict(list)
 
     total, skipped = 0, 0
