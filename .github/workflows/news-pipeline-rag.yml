@@ -16,6 +16,7 @@ jobs:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       USE_OPENAI: "True"  # Enable LLM summarization
+      USE_RAG: "True"
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}  # 추가
@@ -51,6 +52,8 @@ jobs:
           pip install openai==1.45.0 httpx==0.27.2
           pip install -r requirements.txt
           pip install gradio-client pillow firebase-admin google-cloud-storage
+          pip install langchain-community wikipedia faiss-cpu spacy
+          python -m spacy download en_core_web_sm
 
       - name: Verify environment
         run: |
