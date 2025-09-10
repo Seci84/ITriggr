@@ -167,12 +167,15 @@ def fetch_actionable(limit: int = 30) -> List[Dict]:
                 "published_at": x.get("published_at", 0),
                 "action_score": x.get("action_score", 0),
                 "talks": x.get("talks", {}),
+                # 🔹 위키 컨텍스트 가져오기(있으면 표시용으로만 활용)
+                "wiki_context": x.get("wiki_context", ""),
                 "__kind": "actionable",
             })
         return out
     except Exception as e:
         st.error(f"Failed to load actionable_articles: {e}")
         return []
+
 
 @st.cache_data(show_spinner=False, ttl=60)
 def fetch_generated(limit: int = 30) -> List[Dict]:
@@ -452,6 +455,13 @@ else:
             st.markdown("<div class='article-section-title'>Sources</div>", unsafe_allow_html=True)
             for url in evidence:
                 st.write(f"- [{url}]({url})")
+
+        # Wikipedia context (있을 때만 표시)
+        wiki_ctx = a.get("wiki_context", "")
+        if wiki_ctx:
+            with st.expander("Wikipedia context", expanded=False):
+                st.write(wiki_ctx)
+
 
         # ---- Talks Preparation: Use DB talks first, then legacy/LLM generation ----
         talks = a.get("talks") or {}
