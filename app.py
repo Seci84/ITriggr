@@ -213,6 +213,34 @@ def fetch_generated(limit: int = 30) -> List[Dict]:
         st.error(f"Failed to load generated_articles_v6: {e}")
         return []
 
+@st.cache_data(show_spinner=False, ttl=60)
+def fetch_public(limit: int = 30) -> List[Dict]:
+    """Fetch fallback articles from public_articles."""
+    try:
+        q = (db.collection("public_articles")
+             .order_by("created_at", direction=firestore.Query.DESCENDING)
+             .limit(limit))
+        out = []
+        for d in q.stream():
+            x = d.to_dict() or {}
+            out.append({
+                "id": d.id,
+                "title": x.get("title", "(No title)"),
+                "summary": x.get("summary") or x.get("content_hint", "") or x.get("body_md", ""),
+                "bullets": x.get("bullets", []),
+                "evidence_urls": x.get("evidence_urls", [x.get("url", "")] if x.get("url") else []),
+                "published_at": x.get("published_at", 0),
+                "images_map": x.get("images_map", {}),
+                "images": x.get("images", []),
+                "talks": x.get("talks", {}),
+                "__kind": "public",
+            })
+        return out
+    except Exception as e:
+        st.error(f"Failed to load public_articles: {e}")
+        return []
+
+
 def ts_to_str(ts: int) -> str:
     try:
         return datetime.fromtimestamp(int(ts), UTC).strftime("%Y-%m-%d %H:%M UTC")
