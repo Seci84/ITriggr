@@ -22,6 +22,20 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langsmith import Client
 
+
+# simhash fallback
+try:
+    from common import simhash  # 있으면 사용
+except Exception:
+    try:
+        from simhash import Simhash
+        def simhash(text: str) -> str:
+            return format(Simhash(text).value, "016x")
+    except Exception:
+        import hashlib
+        def simhash(text: str) -> str:
+            return hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
+
 # --- OpenAI 사용 여부 ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
