@@ -31,8 +31,9 @@ langsmith>=0.1.0
 langchain-community>=0.2.0  # WikipediaLoader 등 커뮤니티 도구
 
 # --- RAG 및 NLP ---
+wikipedia==1.4.0
 spacy>=3.7.0                # NER (rag.py의 augment_with_wiki)
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.0/en_core_web_sm-3.7.0.tar.gz#egg=en_core_web_sm  # spacy 모델
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 faiss-cpu>=1.8.0            # 벡터 검색 (RAG 인덱싱, 옵션)
 
 # --- 비동기 처리 ---
