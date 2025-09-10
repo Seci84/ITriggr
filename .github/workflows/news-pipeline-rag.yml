@@ -24,6 +24,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare empty logs
+        run: |
+           : > fetch_news.log
+           : > cluster_generate.log
+           : > generate_images.log
+           
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -83,19 +89,20 @@ jobs:
           python -c "import firebase_admin; from firebase_admin import firestore; firestore.client(); print('Firestore initialized successfully')"
 
       - name: Fetch news articles
+        if: always()
         run: |
-          python scripts/article_generate/fetch_news.py > fetch_news.log 2>&1
-        continue-on-error: true
+          python scripts/article_generate/fetch_news.py > fetch_news.log 2>&1 || true
 
       - name: Cluster and generate articles
+        if: always()
         run: |
-          python scripts/article_generate/news_pipeline_langchain.py > cluster_generate.log 2>&1
-        continue-on-error: true
+          python scripts/article_generate/news_pipeline_langchain.py > cluster_generate.log 2>&1 || true
 
       - name: Generate images with Qwen
+        if: always()
         run: |
-          python scripts/image_generate/generate_images_qwen.py > generate_images.log 2>&1
-        continue-on-error: true
+          python scripts/image_generate/generate_images_qwen.py > generate_images.log 2>&1 || true
+
 
       - name: Upload logs for debugging
         if: always()
@@ -106,6 +113,7 @@ jobs:
             fetch_news.log
             cluster_generate.log
             generate_images.log
+          if-no-files-found: ignore
 
       - name: Notify completion
         if: always()
