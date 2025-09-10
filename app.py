@@ -1,4 +1,10 @@
 import streamlit as st
+import sys, os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ARTICLE_DIR = os.path.join(BASE_DIR, "scripts", "article_generate")
+if ARTICLE_DIR not in sys.path:
+    sys.path.insert(0, ARTICLE_DIR)
+
 import requests
 import json
 import firebase_admin
@@ -8,7 +14,7 @@ from typing import List, Dict
 from openai import OpenAI
 
 # Pipeline module imports
-from news_pipeline_langchain import _llm, _hub, _format_prompt, build_with_hub_prompts
+from news_pipeline_langchain import _llm, _hub, _format_prompt, build_with_hub_prompts, _str
 from process_articles import build_actionability
 from rag import augment_with_wiki
 
