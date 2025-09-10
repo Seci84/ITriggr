@@ -87,7 +87,7 @@ async def fetch_content(url: str) -> str:
         article = Article(url)
         article.download()
         article.parse()
-        content = normalize(article.text)[:1500]
+        content = normalize(article.text)[:500]
         return content or "Content unavailable"
     except Exception as e:
         print(f"Failed to fetch content from {url}: {e}")
