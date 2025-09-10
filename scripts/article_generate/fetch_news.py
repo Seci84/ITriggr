@@ -66,7 +66,7 @@ def fetch_rss():
 
 def save_raw(db, items):
     saved, skipped, updated = 0, 0, 0
-    col = db.collection("raw_articles")
+    col = db.collection("raw_articles_v6")
 
     for it in items:
         url = it["url"]
