@@ -96,7 +96,7 @@ def fetch_content(url):
         soup = BeautifulSoup(resp.text, "html.parser")
         paragraphs = soup.find_all("p")
         content = " ".join(p.get_text() for p in paragraphs if p.get_text().strip())
-        return content[:1500]
+        return content[:500]
     except Exception as e:
         print(f"Failed to fetch content from {url}: {e}")
         return "Content unavailable"
