@@ -126,7 +126,7 @@ def signout():
 def fetch_generated(limit: int = 30) -> List[Dict]:
     """생성된 기사 우선(없으면 빈 리스트 반환). talks(신규) + 레거시(insights/actions) 함께 수집."""
     try:
-        q = (db.collection("generated_articles_v4")
+        q = (db.collection("generated_articles_v6")
              .order_by("created_at", direction=firestore.Query.DESCENDING)
              .limit(limit))
         out = []
@@ -316,7 +316,7 @@ def save_talks_to_doc(kind: str, doc_id: str, talks: Dict):
     """talks를 문서에 병합 저장."""
     try:
         if kind == "generated":
-            db.collection("generated_articles_v4").document(doc_id).set({"talks": talks}, merge=True)
+            db.collection("generated_articles_v6").document(doc_id).set({"talks": talks}, merge=True)
         elif kind == "public":
             # 퍼블릭에도 저장하려면 주석 해제:
             # db.collection("public_articles").document(doc_id).set({"talks": talks}, merge=True)
@@ -410,7 +410,7 @@ gen = fetch_generated(limit=30)
 articles = gen if gen else fetch_public(limit=30)
 
 if gen:
-    st.success("데이터 소스: generated_articles_v4")
+    st.success("데이터 소스: generated_articles_v6")
 else:
     st.warning("데이터 소스: public_articles (생성 기사가 아직 없거나 필터에 걸리지 않음)")
 
