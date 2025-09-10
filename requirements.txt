@@ -34,7 +34,7 @@ langchain-community==0.2.0  # WikipediaLoader 등 커뮤니티 도구
 wikipedia==1.4.0
 spacy==3.7.0                # NER (rag.py의 augment_with_wiki)
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
-faiss-cpu>=1.8.0            # 벡터 검색 (RAG 인덱싱, 옵션)
+faiss-cpu==1.8.0            # 벡터 검색 (RAG 인덱싱, 옵션)
 
 # --- 비동기 처리 ---
 aiohttp==3.9.0              # 비동기 HTTP 요청 (fetch_contents)
