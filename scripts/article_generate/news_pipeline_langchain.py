@@ -13,7 +13,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 
 from common import init_db, log_event, sim_prefix, normalize, sha256, to_epoch, now_epoch
 from fetch_news import fetch_newsapi, fetch_rss
-from process_articles import fetch_contents, build_actionability, save_filtered
+from process_articles import fetch_contents, build_actionability, save_filtered, _format_prompt
 from rag import augment_with_wiki
 import asyncio
 
