@@ -195,7 +195,7 @@ def article_lock_or_skip(db: firestore.Client, doc_ref: firestore.DocumentRefere
 # 문서별 생성/저장
 # =========================
 def ensure_image_for_article(doc_id: str, a: Dict[str, Any], db: firestore.Client) -> Optional[Dict[str, Any]]:
-    doc_ref = db.collection("generated_articles_v4").document(doc_id)
+    doc_ref = db.collection("generated_articles_v6").document(doc_id)
 
     # 빠른 스킵
     if (a.get("images_map") or {}).get("hero"):
@@ -216,7 +216,7 @@ def ensure_image_for_article(doc_id: str, a: Dict[str, Any], db: firestore.Clien
             dest,
             extra_metadata={
                 "article_id": doc_id,                       # ← 문서 ID
-                "collection": "generated_articles_v4",
+                "collection": "generated_articles_v6",
                 "kind": "hero",
             },
         )
@@ -265,7 +265,7 @@ def ensure_image_for_article(doc_id: str, a: Dict[str, Any], db: firestore.Clien
 def run(limit: int = RUN_LIMIT):
     db, _bucket = init_firebase()
 
-    q = (db.collection("generated_articles_v4")
+    q = (db.collection("generated_articles_v6")
            .order_by("created_at", direction=firestore.Query.DESCENDING)
            .limit(limit))
 
