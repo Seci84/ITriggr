@@ -1,46 +1,52 @@
-# === UI / Core ===
-streamlit==1.37.1
-firebase-admin==6.6.0
-google-cloud-firestore==2.15.0
-requests==2.32.3
-PyYAML==6.0.1
-python-dotenv==1.0.1
-loguru==0.7.2
+# UI/기존
+streamlit>=1.33
+firebase-admin>=6.5.0
+google-cloud-firestore>=2.15.0
+requests>=2.31.0
 
-# === News pipeline (RSS / time) ===
-feedparser==6.0.11
-python-dateutil==2.9.0.post0
-pytz==2024.1
 
-# === OpenAI / HTTP ===
+# Week 2 파이프라인용
+feedparser>=6.0.11          # RSS 피드 파싱
+python-dateutil>=2.9.0      # 날짜 변환
+pytz>=2024.1                # 타임존 처리
+
+# (선택) LLM 요약 생성
 openai==1.45.0
-tiktoken==0.7.0
+tiktoken>=0.7.0
 httpx==0.27.2
 
-# === HTML parsing / content fetch ===
-beautifulsoup4==4.12.3
-lxml[html_clean]==5.2.2
-newspaper3k==0.2.8
+# 신규 추가 (URL 본문 추출)
+beautifulsoup4>=4.12.2      # HTML 파싱
+newspaper3k>=0.2.8          # 비동기 본문 크롤링 (process_articles.py)
 
-# === Images ===
-gradio_client==0.15.0
-pillow==10.3.0
-opencv-python-headless==4.10.0.84
+# 신규 추가 (이미지 생성/처리)
+gradio_client>=0.15.0       # Hugging Face Spaces API 클라이언트
+pillow>=10.3.0              # 이미지 처리 (PIL)
+opencv-python>=4.10.0.84    # 이미지 편집 (Grok 3 이미지 편집 지원)
 
-# === LangChain stack (호환 버전 세트) ===
-langchain==0.3.7
-langchain-community==0.3.7
-langchain-openai==0.2.6
-langsmith==0.1.119
-# ⚠️ 'langchain-core'는 별도로 핀하지 마세요. (충돌 유발)
+# --- LangChain & OpenAI stack ---
+langchain==0.2.11
+langchain-core>=0.2.0
+langchain-openai>=0.1.0
+langsmith>=0.1.0
+langchain-community>=0.2.0  # WikipediaLoader 등 커뮤니티 도구
 
-# === RAG / NLP ===
+
+# --- RAG 및 NLP ---
 wikipedia==1.4.0
-spacy==3.7.4
+spacy>=3.7.0                # NER (rag.py의 augment_with_wiki)
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+faiss-cpu>=1.8.0            # 벡터 검색 (RAG 인덱싱, 옵션)
 
-# === Async ===
-aiohttp==3.9.5
+# --- 비동기 처리 ---
+aiohttp>=3.9.0              # 비동기 HTTP 요청 (fetch_contents)
 
-# === Utils ===
-simhash==2.0.1
+# --- YAML config ---
+PyYAML>=6.0
+
+# --- Utilities ---
+python-dotenv>=1.0.0        # .env 파일로 환경변수 관리
+loguru>=0.7.0               # 로깅 개선 (log_event 대체 가능성)
+
+lxml==5.2.2
+lxml_html_clean==0.2.0
