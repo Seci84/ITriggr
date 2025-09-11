@@ -1,7 +1,10 @@
-# 역할: NewsAPI(+옵션 RSS)에서 기사 수집 → URL 기준 완전 중복만 제거 → raw_articles 저장
-# (유사 기사들은 남겨둠 → 다음 단계에서 묶어서 재구성)
+# 역할: NewsAPI(+옵션 RSS)에서 기사 수집 → (옵션) raw 저장 → LLM 점수화 호출 → 통과분만 반환
+# (유사 기사들은 남겨둠 → 이후 단계에서 "통과분만" 묶어서 재구성)
+# SAVE_RAW 환경변수로 raw_articles_v6 저장 여부를 제어(기본 False).
+# process_articles.analyze_and_save()를 호출하여 통과분만 DB 저장하고, 통과분 리스트를 반환
 
 import os, requests, feedparser
+from typing import List, Dict, Any, Tuple, Union
 from common import init_db, now_epoch, to_epoch, normalize, sha256, simhash, log_event, doc_id_from_url
 from firebase_admin import firestore
 from process_articles import analyze_and_save
@@ -9,8 +12,9 @@ import asyncio
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 RSS_SOURCES = os.getenv("RSS_SOURCES", "")
+SAVE_RAW = os.getenv("SAVE_RAW", "False").lower() == "true"  # ✅ raw 저장 토글(기본 False)
 
-def fetch_newsapi():
+def fetch_newsapi() -> List[Dict[str, Any]]:
     if not NEWSAPI_KEY:
         return []
     url = "https://newsapi.org/v2/top-headlines"
@@ -39,7 +43,7 @@ def fetch_newsapi():
         })
     return out
 
-def fetch_rss():
+def fetch_rss() -> List[Dict[str, Any]]:
     if not RSS_SOURCES.strip():
         return []
     out = []
@@ -63,14 +67,14 @@ def fetch_rss():
             })
     return out
 
-
-def save_raw(db, items):
+def save_raw(db, items: List[Dict[str, Any]]) -> Tuple[int, int, int]:
+    """URL 기준 멱등 upsert. SAVE_RAW=True 일 때만 사용."""
     saved, skipped, updated = 0, 0, 0
     col = db.collection("raw_articles_v6")
 
     for it in items:
         url = it["url"]
-        doc_id = doc_id_from_url(url)           # URL 해시 = 문서 ID
+        doc_id = doc_id_from_url(url)           # URL 해시 = 문서 ID (공통화)
         doc_ref = col.document(doc_id)
         snap = doc_ref.get()
 
@@ -80,7 +84,7 @@ def save_raw(db, items):
         it.setdefault("created_at", firestore.SERVER_TIMESTAMP)
 
         if snap.exists:
-            # 이미 있으면 최신 메타만 업데이트 (예: published_at 오차 보정)
+            # 이미 있으면 최신 메타만 업데이트
             doc_ref.set({
                 "source": it["source"],
                 "source_name": it["source_name"],
@@ -100,10 +104,12 @@ def save_raw(db, items):
 
     return saved, skipped, updated
 
-
-if __name__ == "__main__":
+def run_ingest() -> List[Dict[str, Any]]:
+    """수집 → (옵션) raw 저장 → LLM 점수화 호출 → 통과분 리스트 반환."""
     db = init_db()
-    all_items = []
+    all_items: List[Dict[str, Any]] = []
+
+    # 1) 수집
     try:
         all_items += fetch_newsapi()
     except Exception as e:
@@ -116,17 +122,42 @@ if __name__ == "__main__":
     if not all_items:
         log_event(db, "no_items", {})
         print("No items")
-        raise SystemExit(0)
+        return []
 
-    saved, skipped, updated = save_raw(db, all_items)
-    log_event(db, "ingest_done", {"saved": saved, "updated": updated, "total": len(all_items)})
-    print(f"saved={saved} updated={updated} total={len(all_items)}")
+    # 2) (옵션) raw 저장
+    if SAVE_RAW:
+        saved, skipped, updated = save_raw(db, all_items)
+        log_event(db, "ingest_raw_done", {"saved": saved, "updated": updated, "total": len(all_items)})
+        print(f"[raw] saved={saved} updated={updated} total={len(all_items)}")
+    else:
+        print("[raw] skipped (SAVE_RAW=False)")
 
-    # --- process_articles.py 통합 ---
+    # 3) 본문 크롤링 + LLM 점수화 + 통과분 DB 저장 + 통과분 리스트 반환
     try:
-        asyncio.run(analyze_and_save(db, all_items))
-        log_event(db, "filter_done", {"status": "success"})
+        result = asyncio.run(analyze_and_save(db, all_items))
     except Exception as e:
         log_event(db, "err_filter", {"msg": str(e)})
         print(f"Filter error: {e}")
+        return []
 
+    # 하위 호환 처리:
+    # - 신버전: analyze_and_save → List[Dict] (통과분 리스트)
+    # - 구버전: analyze_and_save → Tuple(saved, skipped)
+    passed_items: List[Dict[str, Any]] = []
+    if isinstance(result, list):
+        passed_items = result
+        log_event(db, "filter_done_returned", {"passed_count": len(passed_items)})
+        print(f"[filter] passed={len(passed_items)} (returned list)")
+    elif isinstance(result, tuple) and len(result) == 2:
+        saved_cnt, skipped_cnt = result
+        log_event(db, "filter_done_legacy", {"saved": saved_cnt, "skipped": skipped_cnt})
+        print(f"[filter] saved={saved_cnt} skipped={skipped_cnt} (legacy tuple)")
+        # 구버전인 경우, 통과분 리스트는 알 수 없으므로 빈 리스트 반환
+    else:
+        print(f"[filter] Unexpected return from analyze_and_save: {type(result)}")
+
+    return passed_items
+
+if __name__ == "__main__":
+    passed = run_ingest()
+    print(f"Done. passed_count={len(passed)}")
