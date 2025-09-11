@@ -17,6 +17,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       USE_OPENAI: "True"  # Enable LLM summarization
       USE_RAG: "True"
+      SAVE_RAW: "False"
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}  # 추가
@@ -91,17 +92,17 @@ jobs:
       - name: Fetch news articles
         if: always()
         run: |
-          python scripts/article_generate/fetch_news.py > fetch_news.log 2>&1 || true
+          python scripts/article_generate/fetch_news.py > fetch_news_v6.log 2>&1 || true
 
       - name: Cluster and generate articles
         if: always()
         run: |
-          python scripts/article_generate/news_pipeline_langchain.py > cluster_generate.log 2>&1 || true
+          python scripts/article_generate/news_pipeline_langchain.py > cluster_generate_v6.log 2>&1 || true
 
       - name: Generate images with Qwen
         if: always()
         run: |
-          python scripts/image_generate/generate_images_qwen.py > generate_images.log 2>&1 || true
+          python scripts/image_generate/generate_images_qwen.py > generate_images_v6.log 2>&1 || true
 
 
       - name: Upload logs for debugging
@@ -110,9 +111,9 @@ jobs:
         with:
           name: pipeline-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            fetch_news.log
-            cluster_generate.log
-            generate_images.log
+            fetch_news_v6.log
+            cluster_generate_v6.log
+            generate_images_v6.log
           if-no-files-found: ignore
 
       - name: Notify completion
