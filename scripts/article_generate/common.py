@@ -66,3 +66,14 @@ def log_event(db, kind: str, payload: dict):
     db.collection("logs_ingest").add(
         {"kind": kind, "payload": payload, "ts": firestore.SERVER_TIMESTAMP}
     )
+
+# \u003d 등 복구
+def sanitize_url(u: str) -> str:
+    if not u:
+        return u
+    # 흔한 유니코드 이스케이프 복구
+    return (
+        u.replace("\\u003d", "=")
+         .replace("\\u0026", "&")
+         .replace("\\u002F", "/")
+    )
