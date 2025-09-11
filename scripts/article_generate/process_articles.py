@@ -17,6 +17,8 @@ from firebase_admin import firestore
 from common import normalize, log_event, doc_id_from_url, simhash  # ← 추가: doc_id_from_url, simhash
 from rag import augment_with_wiki
 
+from common import sanitize_url
+
 # --- 환경 변수 ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
@@ -89,6 +91,7 @@ def _format_prompt(p, **vals):
             vals[missing_norm] = vals[missing_raw]
 
 async def fetch_content(url: str) -> str:
+    url = sanitize_url(url)
     """비동기 본문 크롤링"""
     try:
         article = Article(url)
