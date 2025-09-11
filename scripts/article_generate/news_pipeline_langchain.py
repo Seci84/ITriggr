@@ -1,3 +1,10 @@
+# fetch_news.run_ingest()로 통과분 리스트를 받아 메모리에서 바로 군집화
+# 통과분이 비어 있으면 actionable_articles에서 최근 문서 읽어 군집화(폴백)
+# 생성 결과는 **generated_articles_v6**에만 저장
+# doc_id_from_url()을 기본 키로 사용, raw_refs에는 통과분의 url_hash들을 기록
+
+
+# news_pipeline_langchain.py
 import os
 import re
 import json
@@ -5,15 +12,19 @@ import time
 import traceback
 from collections import defaultdict
 from urllib.parse import urlparse
+from typing import List, Dict, Tuple
 
 import requests
 from bs4 import BeautifulSoup
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 
-from common import init_db, log_event, sim_prefix, normalize, sha256, to_epoch, now_epoch, simhash
-from fetch_news import fetch_newsapi, fetch_rss
-from process_articles import fetch_contents, build_actionability, save_filtered, _format_prompt
+from common import (
+    init_db, log_event, sim_prefix, normalize, sha256, to_epoch, now_epoch,
+    simhash, doc_id_from_url
+)
+from fetch_news import run_ingest  # ← 통과분 리스트를 돌려줌
+from process_articles import analyze_and_save, _format_prompt  # format 유틸 재사용
 from rag import augment_with_wiki
 import asyncio
 
@@ -21,20 +32,6 @@ import asyncio
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langsmith import Client
-
-
-# simhash fallback
-try:
-    from common import simhash  # 있으면 사용
-except Exception:
-    try:
-        from simhash import Simhash
-        def simhash(text: str) -> str:
-            return format(Simhash(text).value, "016x")
-    except Exception:
-        import hashlib
-        def simhash(text: str) -> str:
-            return hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
 
 # --- OpenAI 사용 여부 ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -68,7 +65,6 @@ PROMPT_IDS = {
     "talks_entrepreneur": "talks-entrepreneur:2025-09-04",
     "talks_politician": "talks-politician:2025-09-04",
     "talks_investor": "talks-investor:2025-09-04",
-    "actionability": "actionability:2025-09-09"  # process_articles.py와 통합
 }
 
 _ls = Client()
@@ -76,7 +72,7 @@ _str = StrOutputParser()
 _json = JsonOutputParser()
 
 def _hub(name: str):
-    """LangSmith에서 프롬프트를 끌어오되, 태그 못 찾으면 :latest로 폴백"""
+    """LangSmith에서 프롬프트 로드, 실패 시 :latest 폴백"""
     pid = PROMPT_IDS[name]
     try:
         return _ls.pull_prompt(pid)
@@ -85,7 +81,6 @@ def _hub(name: str):
         print(f"[Hub] Falling back to latest for {base}")
         return _ls.pull_prompt(f"{base}:latest")
 
-# --- 유틸 (기존 그대로 유지) ---
 def safe_parse_json(content: str):
     try:
         return json.loads(content)
@@ -102,7 +97,7 @@ def safe_parse_json(content: str):
     raise ValueError(f"JSON parse failed. head={content[:120]!r}")
 
 def fetch_content(url):
-    """URL에서 기사 본문 추출 (process_articles.py와 통합)"""
+    """간단 본문 추출(생성 입력 보강용)"""
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         resp = requests.get(url, headers=headers, timeout=10)
@@ -110,37 +105,46 @@ def fetch_content(url):
         soup = BeautifulSoup(resp.text, "html.parser")
         paragraphs = soup.find_all("p")
         content = " ".join(p.get_text() for p in paragraphs if p.get_text().strip())
-        return content[:500]
+        return normalize(content)[:500] or "Content unavailable"
     except Exception as e:
         print(f"Failed to fetch content from {url}: {e}")
         return "Content unavailable"
 
-def load_recent_raw_groups(db, window_sec=6*60*60, prefix_bits=16,
-                           exclude_domains=("nytimes.com", "nyti.ms")):
-    def _is_excluded(url: str) -> bool:
-        try:
-            host = urlparse(url or "").netloc.lower()
-            return any(host == d or host.endswith("." + d) for d in exclude_domains)
-        except Exception:
-            return False
+# =========================
+# 통과분 전용 군집화 로직
+# =========================
+def group_passed_items(passed_items: List[Dict], prefix_bits: int = 16) -> Dict[str, List[Tuple[str, Dict]]]:
+    """
+    통과분 리스트(메모리)만으로 simhash prefix 군집화.
+    반환: {cluster_key: [(doc_id(url_hash), item_dict), ...], ...}
+    """
+    groups = defaultdict(list)
+    for it in passed_items:
+        # url_hash 키가 없을 수 있으므로 보강
+        uid = it.get("url_hash") or doc_id_from_url(it.get("url", ""))
+        if not it.get("simhash"):
+            it["simhash"] = simhash(f"{it.get('title','')} {it.get('content_hint','')}")
+        k = sim_prefix(it["simhash"], prefix_bits=prefix_bits)
+        groups[k].append((uid, it))
+    print(f"Loaded {len(groups)} clusters from passed_items (total={len(passed_items)})")
+    return groups
 
+def load_recent_actionable_groups(db, window_sec=6*60*60, prefix_bits=16):
+    """
+    폴백: actionable_articles에서 최근 문서만 읽어 군집화.
+    """
     now = int(time.time())
     since = now - window_sec
-    q = db.collection("raw_articles_v6").where(filter=FieldFilter("published_at", ">=", since))
+    q = db.collection("actionable_articles").where(filter=FieldFilter("published_at", ">=", since))
     groups = defaultdict(list)
-
-    total, skipped = 0, 0
+    total = 0
     for d in q.stream():
         it = d.to_dict() or {}
-        url = it.get("url", "")
         total += 1
-        if _is_excluded(url):
-            skipped += 1
-            continue
         k = sim_prefix(it.get("simhash", ""), prefix_bits=prefix_bits)
-        groups[k].append((d.id, it))
-
-    print(f"Loaded {len(groups)} clusters (total={total}, skipped={skipped})")
+        uid = d.id or it.get("url_hash") or doc_id_from_url(it.get("url", ""))
+        groups[k].append((uid, it))
+    print(f"Loaded {len(groups)} clusters from actionable_articles (total={total})")
     return groups
 
 def already_generated(db, cluster_key: str) -> bool:
@@ -164,122 +168,81 @@ def make_payload_from_sources(items):
     talks = {"general": "", "entrepreneur": "", "politician": "", "investor": ""}
     return {"title": title, "summary": summary, "bullets": bullets, "facts": facts, "talks": talks}
 
-# === LangSmith 프롬프트 실행 (build_with_hub_prompts 수정) ===
-def build_with_hub_prompts(input_text: str, sources: list[str]) -> dict:
+# === LangSmith 프롬프트 실행
+def build_with_hub_prompts(input_text: str, sources: List[str]) -> dict:
     """본문 전체(input_text)만 각 프롬프트의 입력으로 사용, facts에 sources 전달."""
     if not _llm:
         return None
     try:
-        print(f"[DEBUG] Received input_text length: {len(input_text)}, sample: {input_text[:100]}...")
-
         # summary
         summary = (_llm | _str).invoke(_format_prompt(_hub("summary"), input=input_text)).strip()
-        print(f"[DEBUG] Summary generated: {summary[:50]}...")
 
         # bullets (JSON 배열로 수신)
         bullets_raw = (_llm | _json).invoke(_format_prompt(_hub("bullets"), input=input_text))
         bullets = bullets_raw if isinstance(bullets_raw, list) and len(bullets_raw) == 3 else ["Key point 1", "Key point 2", "Key point 3"]
-        print(f"[DEBUG] Bullets generated: {bullets}")
 
         # title
         title = (_llm | _str).invoke(_format_prompt(_hub("title"), input=input_text)).strip()
-        print(f"[DEBUG] Title generated: {title}")
 
         # facts (JSON)
         facts = (_llm | _json).invoke(
             _format_prompt(_hub("facts"), input=input_text, sources="\n".join(sources))
         )
-        print(f"[DEBUG] Facts generated: {facts}")
+        if not isinstance(facts, list):
+            facts = []
 
         # talks
-        summary_text = summary
         bullets_block = "\n".join(f"- {b}" for b in bullets)
-        tg = (_llm | _str).invoke(_format_prompt(_hub("talks_general"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
-        te = (_llm | _str).invoke(_format_prompt(_hub("talks_entrepreneur"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
-        tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
-        ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary_text, bullets=bullets_block)).strip()
+        tg = (_llm | _str).invoke(_format_prompt(_hub("talks_general"), input=input_text, summary=summary, bullets=bullets_block)).strip()
+        te = (_llm | _str).invoke(_format_prompt(_hub("talks_entrepreneur"), input=input_text, summary=summary, bullets=bullets_block)).strip()
+        tp = (_llm | _str).invoke(_format_prompt(_hub("talks_politician"), input=input_text, summary=summary, bullets=bullets_block)).strip()
+        ti = (_llm | _str).invoke(_format_prompt(_hub("talks_investor"), input=input_text, summary=summary, bullets=bullets_block)).strip()
 
         return {
             "title": title,
             "summary": summary,
             "bullets": bullets,
-            "facts": facts if isinstance(facts, list) else [],
+            "facts": facts,
             "talks": {"general": tg, "entrepreneur": te, "politician": tp, "investor": ti}
         }
     except Exception as e:
-        print(f"[HubBuild] error: {e}, input_text: {input_text[:100]}...")
+        print(f"[HubBuild] error: {e}")
         return None
 
-# === 메인 파이프라인 ===
+# =========================
+# 메인 파이프라인
+# =========================
 def run_once():
     db = init_db()
-    # 1. 기사 수집
-    all_items = []
+
+    # 1) 수집 → 본문 크롤링/점수화 → 통과분 리스트 확보
+    passed_items: List[Dict] = []
     try:
-        all_items += fetch_newsapi()
+        passed_items = run_ingest()  # SAVE_RAW=False면 raw 저장 없이 통과분만 생성됨
     except Exception as e:
-        log_event(db, "err_newsapi", {"msg": str(e)})
-    try:
-        all_items += fetch_rss()
-    except Exception as e:
-        log_event(db, "err_rss", {"msg": str(e)})
+        log_event(db, "err_ingest", {"msg": str(e)})
+        print(f"[Ingest error] {e}")
 
-    if not all_items:
-        log_event(db, "no_items", {})
-        print("No items")
-        return
+    # 2) 군집 대상 결정: 메모리 통과분 우선, 없으면 actionable_articles 폴백
+    if passed_items:
+        groups = group_passed_items(passed_items, prefix_bits=16)
+    else:
+        groups = load_recent_actionable_groups(db, window_sec=6*60*60, prefix_bits=16)
 
-    # 2. raw_articles_v6 저장
-    saved, skipped, updated = 0, 0, 0
-    col_raw = db.collection("raw_articles_v6")
-    for it in all_items:
-        url = it["url"]
-        doc_id = sha256(url)  # fetch_news.py와 동일
-        doc_ref = col_raw.document(doc_id)
-        snap = doc_ref.get()
-        it["url_hash"] = doc_id
-        it["simhash"] = sim_prefix(simhash(f"{it['title']} {it.get('content_hint', '')}"))
-        it.setdefault("created_at", firestore.SERVER_TIMESTAMP)
-
-        if snap.exists:
-            doc_ref.set({
-                "source": it["source"],
-                "source_name": it["source_name"],
-                "title": it["title"],
-                "url": it["url"],
-                "published_at": it["published_at"],
-                "content_hint": it.get("content_hint", ""),
-                "lang": it.get("lang", "en"),
-                "simhash": it["simhash"],
-                "url_hash": it["url_hash"],
-                "updated_at": firestore.SERVER_TIMESTAMP,
-            }, merge=True)
-            updated += 1
-        else:
-            doc_ref.set(it)
-            saved += 1
-    log_event(db, "ingest_done", {"saved": saved, "updated": updated, "total": len(all_items)})
-    print(f"saved={saved} updated={updated} total={len(all_items)}")
-
-    # 3. actionable_articles 필터링 및 RAG
-    asyncio.run(analyze_and_save(db, all_items))
-
-    # 4. 클러스터 처리 (기존 로직 유지)
-    groups = load_recent_raw_groups(db)
     created = 0
-
     for cluster_key, items in groups.items():
         if len(items) < 1 or already_generated(db, cluster_key):
             continue
-    
+
         evidence_urls, combined_texts = [], []
         ts_min, ts_max = 10**12, 0
+
         for _id, it in items:
             url = it.get("url", "")
             title = it.get("title", "")
             content = fetch_content(url)
-    
-            # 🔹 위키 컨텍스트 생성
+
+            # RAG 컨텍스트 (필요 시)
             try:
                 aug = augment_with_wiki({
                     "content": content,
@@ -288,24 +251,22 @@ def run_once():
                 wiki_ctx = aug.get("wiki_context", "")
             except Exception:
                 wiki_ctx = ""
-    
+
             evidence_urls.append(url)
-    
-            # 🔹 위키 컨텍스트를 LLM 입력 텍스트에만 덧붙임(존재할 때만)
-            if wiki_ctx:
-                combined_texts.append(f"{title}\n{content}\n\n[WIKI]\n{wiki_ctx}")
-            else:
-                combined_texts.append(f"{title}\n{content}")
-    
+            combined_texts.append(
+                f"{title}\n{content}" + (f"\n\n[WIKI]\n{wiki_ctx}" if wiki_ctx else "")
+            )
+
             ts = int(it.get("published_at", 0) or 0)
             ts_min, ts_max = min(ts_min, ts), max(ts_max, ts)
 
-
+        # 3) LLM 생성
         payload, latency_ms, model_used = None, 0, "template"
+        input_text = "\n\n".join(combined_texts)
+
         if USE_OPENAI:
             try:
                 t0 = time.time()
-                input_text = "\n\n".join(combined_texts)
                 payload = build_with_hub_prompts(input_text, evidence_urls)
                 latency_ms = int((time.time() - t0) * 1000)
                 if payload and payload.get("summary") != "Template summary (LLM disabled)":
@@ -321,6 +282,7 @@ def run_once():
         if payload is None:
             payload = make_payload_from_sources(items)
 
+        # 4) 저장 (generated_articles_v6)
         doc = {
             "cluster_key": cluster_key,
             "title": payload.get("title", ""),
@@ -329,7 +291,7 @@ def run_once():
             "facts": payload.get("facts", []),
             "talks": payload.get("talks", {}),
             "evidence_urls": evidence_urls,
-            "raw_refs": [x[0] for x in items],
+            "raw_refs": [x[0] for x in items],  # url_hash / actionable document id
             "published_window": {"start": ts_min, "end": ts_max},
             "model": model_used,
             "token_usage": {},  # LangSmith에서 추적
@@ -344,7 +306,7 @@ def run_once():
         except Exception as e:
             print(f"[ERROR] Failed to save to Firestore for {cluster_key}: {e}")
 
-    log_event(db, "generate_done_v4", {"created": created})
+    log_event(db, "generate_done_v6", {"created": created})
     print(f"Done. groups={len(groups)}, created={created}")
 
 if __name__ == "__main__":
