@@ -1,3 +1,9 @@
+# 본문 수집 → fetch_contents()에서 기사 URL 크롤링 (newspaper3k 이용)
+# 액션성 판단 → build_actionability()에서 LLM 프롬프트 실행, 점수/사유 생성
+# 필터링 후 저장 → save_filtered()에서 점수 ≥7인 기사만 actionable_articles 컬렉션에 저장
+# **“통과분끼리 묶어서(군집화) 카드 생성”**은 news_pipeline_langchain.py에서 실행
+
+# process_articles.py
 import os
 import asyncio
 import aiohttp
@@ -7,7 +13,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser
 from langsmith import Client
 from firebase_admin import firestore
-from common import normalize, log_event
+
+from common import normalize, log_event, doc_id_from_url, simhash  # ← 추가: doc_id_from_url, simhash
 from rag import augment_with_wiki
 
 # --- 환경 변수 ---
@@ -94,7 +101,7 @@ async def fetch_content(url: str) -> str:
         return "Content unavailable"
 
 async def fetch_contents(items: List[Dict]) -> List[Dict]:
-    """비동기 배치 크롤링"""
+    """비동기 배치 크롤링 + (옵션) 위키 컨텍스트 주입"""
     async with aiohttp.ClientSession() as session:
         tasks = []
         for item in items:
@@ -104,7 +111,7 @@ async def fetch_contents(items: List[Dict]) -> List[Dict]:
             item["content"] = str(content) if not isinstance(content, Exception) else "Content unavailable"
             item["crawl_status"] = "success" if not isinstance(content, Exception) else "failed"
 
-            # 위키 컨텍스트 주입 (USE_RAG이 False면 빈 문자열을 반환)
+            # 위키 컨텍스트 주입 (USE_RAG=False면 빈 문자열)
             try:
                 aug = augment_with_wiki({
                     "content": item.get("content", ""),
@@ -114,7 +121,6 @@ async def fetch_contents(items: List[Dict]) -> List[Dict]:
             except Exception:
                 item["wiki_context"] = ""
         return items
-
 
 def build_actionability(item: Dict) -> Optional[Dict]:
     """LLM으로 액션 가능성 판단"""
@@ -138,10 +144,14 @@ def build_actionability(item: Dict) -> Optional[Dict]:
         print(f"[Actionability] Error: {e}")
         return None
 
-def save_filtered(db, items: List[Dict]):
-    """LLM 점수 >=7인 기사만 저장"""
-    saved, skipped = 0, 0
+def save_filtered(db, items: List[Dict]) -> List[Dict]:
+    """
+    LLM 점수 >= 7인 기사만 저장하고, 통과분 리스트를 반환.
+    저장 필드: 최소 메타 + 본문 + wiki_context + 점수/사유
+    """
     col = db.collection("actionable_articles")
+    passed: List[Dict] = []
+    saved, skipped = 0, 0
 
     for item in items:
         result = build_actionability(item)
@@ -164,11 +174,22 @@ def save_filtered(db, items: List[Dict]):
             skipped += 1
             continue
 
+        # ---- 통과분: 최소 메타 정규화 ----
+        url = item["url"]
+        doc_id = doc_id_from_url(url)  # 문서 키 일관화
+        item["url_hash"] = doc_id
+        # simhash가 없다면 계산
+        if not item.get("simhash"):
+            item["simhash"] = simhash(f"{item['title']} {item.get('content_hint','')}")
+
+        item["action_score"] = score
+        item["action_reason"] = reason
+
         doc = {
             "source": item["source"],
             "source_name": item["source_name"],
             "title": item["title"],
-            "url": item["url"],
+            "url": url,
             "published_at": item["published_at"],
             "content_hint": item.get("content_hint", ""),
             "content": item.get("content", ""),
@@ -178,42 +199,26 @@ def save_filtered(db, items: List[Dict]):
             "action_score": score,
             "action_reason": reason,
             "crawl_status": item.get("crawl_status", "unknown"),
-            # 위키 컨텍스트 저장(스키마에 영향 없이 선택 필드로 추가)
             "wiki_context": item.get("wiki_context", ""),
             "llm_processed_at": firestore.SERVER_TIMESTAMP,
             "created_at": firestore.SERVER_TIMESTAMP
         }
-        col.document(item["url_hash"]).set(doc)
+        # 멱등 저장
+        col.document(doc_id).set(doc, merge=True)
+        passed.append(item)
         saved += 1
 
     log_event(db, "filter_done", {"saved": saved, "skipped": skipped, "total": len(items)})
     print(f"Saved={saved}, Skipped={skipped}, Total={len(items)}")
-    return saved, skipped
+    return passed
 
-async def analyze_and_save(db, items: List[Dict]):
-    """메인 처리 함수"""
-    items = await fetch_contents(items[:100])  # 하루 100개 제한
-    saved, skipped = save_filtered(db, items)
-    return saved, skipped
-
-# --- RAG (옵션, 주석 처리) ---
-# def augment_with_wiki(item: Dict) -> Dict:
-#     import spacy
-#     from langchain_community.document_loaders import WikipediaLoader
-#     from langchain.vectorstores import FAISS
-#     nlp = spacy.load("en_core_web_sm")
-#     doc = nlp(item.get("content", "") + " " + item.get("content_hint", ""))
-#     entities = [ent.text for ent in doc.ents if ent.label_ == "ORG"]
-#     wiki_docs = []
-#     for entity in entities[:3]:  # 최대 3개 기업
-#         try:
-#             loader = WikipediaLoader(query=entity, load_max_docs=1)
-#             docs = loader.load()
-#             wiki_docs.extend([normalize(doc.page_content)[:500] for doc in docs])
-#         except:
-#             continue
-#     item["wiki_context"] = "\n".join(wiki_docs) if wiki_docs else ""
-#     return item
+async def analyze_and_save(db, items: List[Dict]) -> List[Dict]:
+    """
+    메인 처리 함수: 본문 크롤링(+RAG) → LLM 점수화 → 통과분 저장 → 통과분 리스트 반환
+    """
+    items = await fetch_contents(items[:100])  # 하루 100개 제한(필요 시 조정)
+    passed = save_filtered(db, items)
+    return passed
 
 if __name__ == "__main__":
     from common import init_db
@@ -225,8 +230,7 @@ if __name__ == "__main__":
         "url": "https://example.com",
         "published_at": 1631234567,
         "content_hint": "Test summary",
-        "lang": "en",
-        "url_hash": "abc123",
-        "simhash": "def456"
+        "lang": "en"
     }]
-    asyncio.run(analyze_and_save(db, sample_items))
+    out = asyncio.run(analyze_and_save(db, sample_items))
+    print(f"passed_count={len(out)}")
