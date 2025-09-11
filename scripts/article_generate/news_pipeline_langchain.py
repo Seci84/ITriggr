@@ -181,7 +181,9 @@ def build_with_hub_prompts(input_text: str, sources: List[str]) -> dict:
         summary = (_llm | _str).invoke(_format_prompt(_hub("summary"), input=input_text)).strip()
 
         # bullets (JSON 배열로 수신)
-        bullets_raw = (_llm | _json).invoke(_format_prompt(_hub("bullets"), input=input_text))
+        bullets_input = summary if summary else input_text
+        bullets_raw = (_llm | _json).invoke(_format_prompt(_hub("bullets"), input=bullets_input))
+        # bullets_raw = (_llm | _json).invoke(_format_prompt(_hub("bullets"), input=input_text))
         bullets = bullets_raw if isinstance(bullets_raw, list) and len(bullets_raw) == 3 else ["Key point 1", "Key point 2", "Key point 3"]
 
         # title
