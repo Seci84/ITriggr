@@ -34,7 +34,7 @@ from google.cloud import exceptions as gcloud_exceptions
 # =========================
 # 환경변수
 # =========================
-FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT", "streamlit-test-d4ef0.firebasestorage.app")
+FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT", "")
 QWEN_SPACE                = os.getenv("QWEN_SPACE", "Qwen/Qwen-Image")
 RUN_LIMIT                 = int(os.getenv("RUN_LIMIT", "30"))
 
