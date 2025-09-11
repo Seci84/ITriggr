@@ -1,6 +1,7 @@
 import os
 from typing import Dict
 from langchain_community.document_loaders import WikipediaLoader
+from langchain_community.vectorstores import FAISS
 from common import normalize
 
 # --- 환경 변수 ---
@@ -15,7 +16,7 @@ def augment_with_wiki(item: Dict) -> Dict:
     try:
         # 의존성 임포트 (런타임 시 로드)
         import spacy
-        from langchain.vectorstores import FAISS
+        # from langchain.vectorstores import FAISS
         nlp = spacy.load("en_core_web_sm", disable=["ner"])
         doc = nlp(item.get("content", "") + " " + item.get("content_hint", ""))
         entities = [ent.text for ent in doc.ents if ent.label_ == "ORG"][:3]  # 최대 3개 기업
