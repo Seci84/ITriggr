@@ -28,6 +28,8 @@ from process_articles import analyze_and_save, _format_prompt  # format 유틸 �
 from rag import augment_with_wiki
 import asyncio
 
+from common import sanitize_url
+
 # === LangChain / LangSmith ===
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
@@ -97,6 +99,7 @@ def safe_parse_json(content: str):
     raise ValueError(f"JSON parse failed. head={content[:120]!r}")
 
 def fetch_content(url):
+    url = sanitize_url(url)
     """간단 본문 추출(생성 입력 보강용)"""
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
